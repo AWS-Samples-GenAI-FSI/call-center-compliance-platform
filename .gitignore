@@ -13,6 +13,7 @@ dist/
 # IDE files
 .vscode/settings.json
 .idea/
+.kiro/
 *.swp
 *.swo
 
