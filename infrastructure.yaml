@@ -123,6 +123,24 @@ Resources:
       SubnetId: !Ref AnyCompanyPublicSubnet2
       RouteTableId: !Ref AnyCompanyPublicRouteTable
 
+  # SQS Queue for Batch Processing
+  AnyCompanyProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'anycompany-processing-queue-${Environment}'
+      VisibilityTimeoutSeconds: 960
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AnyCompanyProcessingDLQ.Arn
+        maxReceiveCount: 3
+
+  AnyCompanyProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'anycompany-processing-dlq-${Environment}'
+      MessageRetentionPeriod: 1209600
+
   # S3 Buckets
   AnyCompanyInputBucket:
     Type: AWS::S3::Bucket
@@ -144,6 +162,17 @@ Resources:
             AllowedMethods: [GET, PUT, POST]
             AllowedOrigins: ['*']
             MaxAge: 3000
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt AnyCompanyProcessingQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: audio/
+                  - Name: suffix
+                    Value: .wav
 
   AnyCompanyTranscribeOutputBucket:
     Type: AWS::S3::Bucket
@@ -593,6 +622,15 @@ Resources:
                   - !Sub 'arn:aws:s3:::${AnyCompanyInputBucket}'
                   - !Sub 'arn:aws:s3:::${AnyCompanyTranscribeOutputBucket}'
                   - !Sub 'arn:aws:s3:::${AnyCompanyComprehendOutputBucket}'
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt AnyCompanyProcessingQueue.Arn
+                  - !GetAtt AnyCompanyProcessingDLQ.Arn
 
   AnyCompanyApiFunction:
     Type: AWS::Lambda::Function
@@ -1130,6 +1168,7 @@ Resources:
       Handler: index.lambda_handler
       Role: !GetAtt AnyCompanyLambdaRole.Arn
       Timeout: 900
+      ReservedConcurrencyLimit: 10
       Environment:
         Variables:
           CALLS_TABLE: !Ref AnyCompanyCallsTable
@@ -1152,11 +1191,24 @@ Resources:
               calls_table = dynamodb.Table(os.environ['CALLS_TABLE'])
               
               for record in event['Records']:
-                  bucket = record['s3']['bucket']['name']
-                  key = record['s3']['object']['key']
+                  # Handle SQS messages containing S3 events
+                  if 'body' in record:
+                      # Parse SQS message body
+                      message_body = json.loads(record['body'])
+                      if 'Records' in message_body:
+                          s3_records = message_body['Records']
+                      else:
+                          continue
+                  else:
+                      # Direct S3 event (fallback)
+                      s3_records = [record]
                   
-                  if not key.endswith('.wav'):
-                      continue
+                  for s3_record in s3_records:
+                      bucket = s3_record['s3']['bucket']['name']
+                      key = s3_record['s3']['object']['key']
+                      
+                      if not key.endswith('.wav'):
+                          continue
                       
                   call_id = str(uuid.uuid4())
                   filename = key.split('/')[-1]
@@ -1843,13 +1895,31 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AnyCompanyRestApi}/*/*'
 
-  AnyCompanyS3Permission:
-    Type: AWS::Lambda::Permission
+  # SQS Event Source Mapping for Batch Processing
+  AnyCompanyProcessorEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
     Properties:
+      EventSourceArn: !GetAtt AnyCompanyProcessingQueue.Arn
       FunctionName: !Ref AnyCompanyProcessorFunction
-      Action: lambda:InvokeFunction
-      Principal: s3.amazonaws.com
-      SourceArn: !GetAtt AnyCompanyInputBucket.Arn
+      BatchSize: 50
+      MaximumBatchingWindowInSeconds: 10
+
+  # SQS Queue Policy
+  AnyCompanyQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref AnyCompanyProcessingQueue
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt AnyCompanyProcessingQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt AnyCompanyInputBucket.Arn
 
   # Rules Seeder Lambda
   AnyCompanyRulesSeederFunction:

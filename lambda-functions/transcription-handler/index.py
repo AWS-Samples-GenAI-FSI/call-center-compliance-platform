@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import time
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -46,6 +47,7 @@ def lambda_handler(event, context):
                 )
                 
                 if response['Items']:
+                    # Path 1: Existing UI upload flow
                     call_record = response['Items'][0]
                     filename = call_record['filename']
                     
@@ -73,7 +75,34 @@ def lambda_handler(event, context):
                     
                     print(f'✅ Successfully processed transcription for {filename}')
                 else:
-                    print(f'❌ No call record found for call_id: {call_id}')
+                    # Path 2: Bulk S3 upload flow - create call record on-the-fly
+                    print(f'📁 No existing call record found - creating for bulk upload: {call_id}')
+                    filename = f'bulk-upload-{job_name}.wav'
+                    
+                    # Extract entities using Comprehend
+                    entities = extract_compliance_entities(transcript_text)
+                    
+                    # Process with rule engine
+                    print(f'🔧 Processing rules for bulk upload {call_id} with transcript length: {len(transcript_text)}')
+                    violations = process_with_rule_engine(transcript_text, call_id, filename)
+                    print(f'⚠️ Found {len(violations)} violations for bulk upload {call_id}')
+                    
+                    # Create new call record for bulk upload
+                    calls_table.put_item(
+                        Item={
+                            'call_id': call_id,
+                            'filename': filename,
+                            'transcript': transcript_text,
+                            'entities': entities,
+                            'violations': violations,
+                            'status': 'completed',
+                            'upload_type': 'bulk_s3',
+                            'created_at': datetime.utcnow().isoformat(),
+                            'processed_at': datetime.utcnow().isoformat()
+                        }
+                    )
+                    
+                    print(f'✅ Successfully processed bulk upload transcription for {filename}')
             
             except Exception as transcript_error:
                 print(f'❌ Error processing transcript file {key}: {str(transcript_error)}')
@@ -282,8 +311,8 @@ def evaluate_rule_simple(rule, transcript, call_id):
     patterns = logic.get('patterns', [])
     required = logic.get('required', True)
     
-    # Basic pattern matching
-    found = any(pattern.lower() in transcript for pattern in patterns)
+    # Regex pattern matching (backward compatible with simple strings)
+    found = any(re.search(pattern, transcript, re.IGNORECASE) for pattern in patterns)
     
     # If required=True and not found, it's a violation
     # If required=False and found, it's a violation
