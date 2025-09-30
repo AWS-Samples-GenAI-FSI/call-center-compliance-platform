@@ -1,0 +1,13 @@
+# Copy this file to terraform.tfvars and customize the values
+
+# Environment name
+environment = "prod"
+
+# AWS region
+aws_region = "us-east-1"
+
+# IP address allowed to access the application (CIDR format)
+allowed_ip = "136.57.32.30/32"
+
+# Whether to deploy ECS service (set to true after image is built)
+deploy_ecs = false
