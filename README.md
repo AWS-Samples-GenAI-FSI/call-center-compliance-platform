@@ -51,14 +51,6 @@ This is the **complete, working compliance validation platform** with all fixes 
 - **AI Services**: AWS Transcribe + Comprehend
 - **Infrastructure**: ECS Fargate, Application Load Balancer, VPC
 
-## 🔗 Access Information
-
-**Application URL**: http://anycompany-compliance-1454089625.us-east-1.elb.amazonaws.com
-
-**Demo Login Credentials**:
-- Username: `compliancemanager`, `auditreviewer`, or `qualityanalyst`
-- Password: `AnyCompanyDemo2024!`
-
 ## 📊 Compliance Rules (43 Total)
 
 ### 🆔 Identification Rules (LO1001) - 9 rules
