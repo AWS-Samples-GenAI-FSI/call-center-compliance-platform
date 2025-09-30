@@ -76,6 +76,8 @@ This is the **complete, working compliance validation platform** with all fixes 
 
 ## 🏗️ Architecture Overview
 
+![Solution Architecture](solution-architecture.png)
+
 ```
 Audio Upload → S3 Input Bucket → Lambda Processor → AWS Transcribe
                                                           ↓
