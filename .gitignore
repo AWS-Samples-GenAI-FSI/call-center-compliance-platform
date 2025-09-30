@@ -34,6 +34,7 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+terraform.tfvars
 
 # Lambda deployment packages
 lambda-functions/*/*.zip
@@ -42,3 +43,14 @@ lambda-functions/*/package/
 # CloudFormation outputs
 cfn-outputs.json
 stack-outputs.json
+
+# Terraform state files
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Temporary upload scripts
+github-upload-instructions.md
+upload-to-github.sh
