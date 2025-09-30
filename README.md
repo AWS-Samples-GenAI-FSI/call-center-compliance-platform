@@ -4,6 +4,36 @@
 
 This is the **complete, working compliance validation platform** with all fixes applied and tested.
 
+## 🚨 Problem Background
+
+**Financial services call centers face critical compliance challenges:**
+
+### Manual Compliance Monitoring Crisis
+- Human reviewers can only check **1-3% of calls**, missing 97%+ of violations
+- **Regulatory requirements** (FDCPA, TCPA, state laws) demand 100% compliance monitoring
+- **High cost of violations**: $1,000-$1,500 per violation + class action lawsuit risk
+
+### Complex Regulatory Landscape
+- **43+ compliance rules** across 4 categories (identification, communication, policy, system)
+- **State-specific requirements** (MA, MI, NH, AZ have unique rules)
+- **Real-time detection needed** to prevent violation escalation
+
+### Critical Compliance Areas
+- 🆔 **Agent Identification**: Name disclosure requirements by state
+- 📞 **Do Not Call (DNC)**: Cease and desist violations
+- 🔒 **Third-Party Disclosure**: Account information leakage
+- 🏥 **Medical Information**: HIPAA-related data handling
+- ⚠️ **Threatening Language**: Harassment and false threats
+- 🛡️ **PII Protection**: Social security, account numbers exposure
+
+### Business Impact
+- 💰 **Regulatory fines** and penalties
+- 📉 **Reputation damage** and customer complaints
+- ⚖️ **Legal liability** and litigation costs
+- 🔄 **Operational inefficiency** from manual processes
+
+**This platform solves these problems with AI-powered automated compliance monitoring using AWS Transcribe and Comprehend for real-time violation detection.**
+
 ## 🚀 What's Working
 
 ### ✅ Core Features
