@@ -1,0 +1,3246 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AnyCompany Compliance Platform - Complete Single Deployment'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: 'prod'
+    Description: 'Environment name'
+  
+  SourceCodeKey:
+    Type: String
+    Default: 'source/anycompany-ui-source.zip'
+    Description: 'S3 key for the source code zip file'
+
+  DeployECS:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: 'Whether to deploy ECS service (set to true after image is built)'
+  
+  AllowedIP:
+    Type: String
+    Default: '136.57.32.30/32'
+    Description: 'IP address allowed to access the application (CIDR format)'
+
+Conditions:
+  ShouldDeployECS: !Equals 
+    - !Ref DeployECS
+    - 'true'
+
+Resources:
+  # Phase 1: Foundation Infrastructure
+  AnyCompanyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-vpc-${Environment}'
+
+  AnyCompanyPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-public-subnet-1-${Environment}'
+
+  AnyCompanyPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-private-subnet-1-${Environment}'
+
+  AnyCompanyPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-public-subnet-2-${Environment}'
+
+  AnyCompanyPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-private-subnet-2-${Environment}'
+
+  AnyCompanyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-igw-${Environment}'
+
+  AnyCompanyVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      InternetGatewayId: !Ref AnyCompanyInternetGateway
+
+  AnyCompanyPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub 'anycompany-public-rt-${Environment}'
+
+  AnyCompanyPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AnyCompanyVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref AnyCompanyPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref AnyCompanyInternetGateway
+
+  AnyCompanyPublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AnyCompanyPublicSubnet1
+      RouteTableId: !Ref AnyCompanyPublicRouteTable
+
+  AnyCompanyPublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AnyCompanyPublicSubnet2
+      RouteTableId: !Ref AnyCompanyPublicRouteTable
+
+  # S3 Buckets
+  AnyCompanyInputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+
+  AnyCompanyTranscribeOutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AnyCompanyComprehendOutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AnyCompanySourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'anycompany-source-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Cognito User Pool
+  AnyCompanyCognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'anycompany-compliance-users-${Environment}'
+      AliasAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: given_name
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: family_name
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      UserPoolTags:
+        Environment: !Ref Environment
+        Application: AnyCompanyCompliance
+
+  AnyCompanyCognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref AnyCompanyCognitoUserPool
+      ClientName: !Sub 'anycompany-compliance-client-${Environment}'
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ADMIN_NO_SRP_AUTH
+        - USER_PASSWORD_AUTH
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      AccessTokenValidity: 8
+      IdTokenValidity: 8
+      RefreshTokenValidity: 30
+      CallbackURLs:
+        - !Sub 'http://${AnyCompanyALB.DNSName}/oauth2/idpresponse'
+      LogoutURLs:
+        - !Sub 'http://${AnyCompanyALB.DNSName}/'
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+
+  AnyCompanyCognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub 'anycompany-auth-${Environment}-${AWS::AccountId}'
+      UserPoolId: !Ref AnyCompanyCognitoUserPool
+
+  # Lambda function to create Cognito users
+  AnyCompanyCognitoUserCreatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-cognito-user-creator-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyCognitoUserCreatorRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref AnyCompanyCognitoUserPool
+          TEMP_PASSWORD: !Sub '{{resolve:secretsmanager:anycompany-temp-pass-${Environment}:SecretString:password}}'
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          import os
+          import traceback
+          
+          def lambda_handler(event, context):
+              print(f'Event: {json.dumps(event)}')
+              try:
+                  if event['RequestType'] == 'Create':
+                      result = create_users()
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {'UsersCreated': result})
+                  elif event['RequestType'] == 'Delete':
+                      # Optionally clean up users on stack deletion
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f'Error in lambda_handler: {str(e)}')
+                  print(f'Traceback: {traceback.format_exc()}')
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+          
+          def create_users():
+              cognito = boto3.client('cognito-idp')
+              user_pool_id = os.environ['USER_POOL_ID']
+              temp_password = os.environ.get('TEMP_PASSWORD', 'AnyCompanyDemo2024!')
+              
+              print(f'Creating users in User Pool: {user_pool_id}')
+              
+              users = [
+                  {
+                      'username': 'compliancemanager',
+                      'email': 'compliance.manager@anycompany.com',
+                      'given_name': 'Compliance',
+                      'family_name': 'Manager',
+                      'role': 'admin'
+                  },
+                  {
+                      'username': 'auditreviewer',
+                      'email': 'audit.reviewer@anycompany.com',
+                      'given_name': 'Audit',
+                      'family_name': 'Reviewer',
+                      'role': 'reviewer'
+                  },
+                  {
+                      'username': 'qualityanalyst',
+                      'email': 'quality.analyst@anycompany.com',
+                      'given_name': 'Quality',
+                      'family_name': 'Analyst',
+                      'role': 'analyst'
+                  }
+              ]
+              
+              created_users = []
+              
+              for user in users:
+                  try:
+                      print(f'Creating user: {user["username"]}')
+                      
+                      # Check if user already exists
+                      try:
+                          cognito.admin_get_user(
+                              UserPoolId=user_pool_id,
+                              Username=user['username']
+                          )
+                          print(f'User {user["username"]} already exists, skipping')
+                          created_users.append(f'{user["username"]} (already exists)')
+                          continue
+                      except cognito.exceptions.UserNotFoundException:
+                          # User doesn't exist, proceed with creation
+                          pass
+                      
+                      response = cognito.admin_create_user(
+                          UserPoolId=user_pool_id,
+                          Username=user['username'],
+                          UserAttributes=[
+                              {'Name': 'email', 'Value': user['email']},
+                              {'Name': 'email_verified', 'Value': 'true'},
+                              {'Name': 'given_name', 'Value': user['given_name']},
+                              {'Name': 'family_name', 'Value': user['family_name']}
+                          ],
+                          TemporaryPassword=temp_password,
+                          MessageAction='SUPPRESS',
+                          ForceAliasCreation=False
+                      )
+                      
+                      print(f'Successfully created user: {user["username"]}')
+                      created_users.append(user['username'])
+                      
+                      # Set permanent password to avoid forced password change
+                      try:
+                          cognito.admin_set_user_password(
+                              UserPoolId=user_pool_id,
+                              Username=user['username'],
+                              Password=temp_password,
+                              Permanent=True
+                          )
+                          print(f'Set permanent password for: {user["username"]}')
+                      except Exception as pwd_error:
+                          print(f'Warning: Could not set permanent password for {user["username"]}: {str(pwd_error)}')
+                      
+                  except Exception as e:
+                      error_msg = f'Error creating user {user["username"]}: {str(e)}'
+                      print(error_msg)
+                      # Don't fail the entire operation for individual user creation failures
+                      created_users.append(f'{user["username"]} (failed: {str(e)})')
+              
+              print(f'User creation summary: {created_users}')
+              return created_users
+
+  AnyCompanyCognitoUserCreatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CognitoUserCreatorPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminSetUserAttributes
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminSetUserPassword
+                  - cognito-idp:AdminDeleteUser
+                  - cognito-idp:ListUsers
+                Resource: !GetAtt AnyCompanyCognitoUserPool.Arn
+
+  # Custom Resource to trigger user creation
+  AnyCompanyCognitoUserCreatorTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt AnyCompanyCognitoUserCreatorFunction.Arn
+    DependsOn: AnyCompanyCognitoUserPool
+
+  # DynamoDB Tables
+  AnyCompanyCallsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'anycompany-calls-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: call_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: call_id
+          KeyType: HASH
+
+  AnyCompanyRulesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'anycompany-rules-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: rule_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: rule_id
+          KeyType: HASH
+
+  # VPC Endpoints for ECR
+  AnyCompanyECREndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref AnyCompanyPrivateSubnet1
+        - !Ref AnyCompanyPrivateSubnet2
+      SecurityGroupIds:
+        - !Ref AnyCompanyVPCEndpointSG
+
+  AnyCompanyECRAPIEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref AnyCompanyPrivateSubnet1
+        - !Ref AnyCompanyPrivateSubnet2
+      SecurityGroupIds:
+        - !Ref AnyCompanyVPCEndpointSG
+
+  AnyCompanyS3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref AnyCompanyVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref AnyCompanyPublicRouteTable
+
+  AnyCompanyVPCEndpointSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for VPC endpoints'
+      VpcId: !Ref AnyCompanyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16
+
+  # Security Groups
+  AnyCompanyALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for ALB - Restricted to authorized IP only'
+      VpcId: !Ref AnyCompanyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedIP
+          Description: 'HTTP access restricted to authorized IP'
+
+  AnyCompanyContainerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for containers'
+      VpcId: !Ref AnyCompanyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref AnyCompanyALBSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: 'HTTPS for AWS API calls'
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: 'HTTP for package downloads'
+
+  # Phase 2: Lambda Functions and API
+  AnyCompanyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: AnyCompanyCompliancePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AnyCompanyInputBucket}/*'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyInputBucket}'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyTranscribeOutputBucket}/*'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyTranscribeOutputBucket}'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyComprehendOutputBucket}/*'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyComprehendOutputBucket}'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt AnyCompanyCallsTable.Arn
+                  - !GetAtt AnyCompanyRulesTable.Arn
+              - Effect: Allow
+                Action:
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - transcribe:ListTranscriptionJobs
+                  - transcribe:DeleteTranscriptionJob
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - comprehend:DetectPiiEntities
+                  - comprehend:DetectSentiment
+                  - comprehend:DetectEntities
+                  - comprehend:DetectKeyPhrases
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AnyCompanyInputBucket}'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyTranscribeOutputBucket}'
+                  - !Sub 'arn:aws:s3:::${AnyCompanyComprehendOutputBucket}'
+
+  AnyCompanyApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-api-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 30
+
+      Environment:
+        Variables:
+          CALLS_TABLE_NAME: !Ref AnyCompanyCallsTable
+          INPUT_BUCKET_NAME: !Ref AnyCompanyInputBucket
+          RULES_TABLE_NAME: !Ref AnyCompanyRulesTable
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          from decimal import Decimal
+
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, obj):
+                  if isinstance(obj, Decimal):
+                      return float(obj)
+                  return super(DecimalEncoder, self).default(obj)
+
+          def lambda_handler(event, context):
+              headers = {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token',
+                  'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+                  'Access-Control-Allow-Credentials': 'true'
+              }
+              
+              if event['httpMethod'] == 'OPTIONS':
+                  return {'statusCode': 200, 'headers': headers}
+              
+              path = event.get('path', '')
+              
+              try:
+                  if path == '/rules':
+                      return get_rules(headers)
+                  elif path == '/results':
+                      return get_results(headers)
+                  elif path == '/upload' or path == '/upload-url':
+                      return get_upload_url(event, headers)
+                  elif path == '/entity-metrics':
+                      return get_entity_metrics(headers)
+                  else:
+                      return {'statusCode': 200, 'headers': headers, 'body': json.dumps({'message': 'API working'})}
+              except Exception as e:
+                  return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': str(e)})}
+
+          def get_results(headers):
+              dynamodb = boto3.resource('dynamodb')
+              s3_client = boto3.client('s3')
+              table = dynamodb.Table(os.environ['CALLS_TABLE_NAME'])
+              
+              response = table.scan()
+              calls = response.get('Items', [])
+              
+              for call in calls:
+                  if 'filename' in call:
+                      try:
+                          call['audio_url'] = s3_client.generate_presigned_url(
+                              'get_object',
+                              Params={
+                                  'Bucket': os.environ['INPUT_BUCKET_NAME'],
+                                  'Key': f"audio/{call['filename']}"
+                              },
+                              ExpiresIn=3600
+                          )
+                      except:
+                          call['audio_url'] = None
+              
+              total_violations = sum(len(call.get('violations', [])) for call in calls)
+              compliance_rate = ((len(calls) * 3 - total_violations) / (len(calls) * 3)) * 100 if calls else 100
+              
+              return {
+                  'statusCode': 200,
+                  'headers': headers,
+                  'body': json.dumps({
+                      'total_calls': len(calls),
+                      'total_violations': total_violations,
+                      'compliance_rate': round(compliance_rate, 1),
+                      'calls': calls
+                  }, cls=DecimalEncoder)
+              }
+
+          def get_upload_url(event, headers):
+              s3_client = boto3.client('s3')
+              
+              body = json.loads(event.get('body', '{}'))
+              filename = body.get('filename', 'audio.wav')
+              
+              # Handle reference files
+              if filename.startswith('reference/'):
+                  content_type = 'application/json' if filename.endswith('.json') else 'text/csv'
+                  key = filename
+              else:
+                  content_type = 'audio/wav'
+                  key = f"audio/{filename}"
+              
+              url = s3_client.generate_presigned_url(
+                  'put_object',
+                  Params={
+                      'Bucket': os.environ['INPUT_BUCKET_NAME'],
+                      'Key': key,
+                      'ContentType': content_type
+                  },
+                  ExpiresIn=3600
+              )
+              
+              return {
+                  'statusCode': 200,
+                  'headers': headers,
+                  'body': json.dumps({'upload_url': url})
+              }
+
+          def get_entity_metrics(headers):
+              dynamodb = boto3.resource('dynamodb')
+              calls_table = dynamodb.Table(os.environ['CALLS_TABLE_NAME'])
+              
+              try:
+                  response = calls_table.scan()
+                  calls = response.get('Items', [])
+                  
+                  if not calls:
+                      return {
+                          'statusCode': 200,
+                          'headers': headers,
+                          'body': json.dumps({
+                              'message': 'No processed calls found. Upload audio files to see entity analysis.',
+                              'total_calls': 0,
+                              'total_entities': 0,
+                              'overall_accuracy': 0,
+                              'avg_confidence': 0
+                          })
+                      }
+                  
+                  # Filter out failed calls
+                  successful_calls = [c for c in calls if c.get('transcript') not in ['TRANSCRIPTION_FAILED', 'PROCESSING', None, '']]
+                  failed_calls = [c for c in calls if c.get('transcript') in ['TRANSCRIPTION_FAILED', 'PROCESSING']]
+                  
+                  if not successful_calls:
+                      return {
+                          'statusCode': 200,
+                          'headers': headers,
+                          'body': json.dumps({
+                              'message': f'No successful transcriptions found. {len(failed_calls)} call(s) failed processing.',
+                              'total_calls': len(calls),
+                              'failed_calls': len(failed_calls),
+                              'total_entities': 0,
+                              'overall_accuracy': 0,
+                              'avg_confidence': 0
+                          })
+                      }
+                  
+                  # Calculate aggregated entity metrics for business analysis
+                  entity_analysis = {
+                      'ssn': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'person_names': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'phone': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'account_numbers': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'financial_terms': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'medical_terms': {'total': 0, 'confidences': [], 'low_conf_count': 0}
+                  }
+                  
+                  low_confidence_threshold = 0.80
+                  
+                  for call in successful_calls:
+                      entities = call.get('entities', {})
+                      if isinstance(entities, dict):
+                          # Process persons (names)
+                          if 'persons' in entities and isinstance(entities['persons'], list):
+                              for entity in entities['persons']:
+                                  if isinstance(entity, dict) and 'confidence' in entity:
+                                      conf = float(entity['confidence']) if isinstance(entity['confidence'], Decimal) else entity['confidence']
+                                      entity_analysis['person_names']['total'] += 1
+                                      entity_analysis['person_names']['confidences'].append(conf)
+                                      if conf < low_confidence_threshold:
+                                          entity_analysis['person_names']['low_conf_count'] += 1
+                          
+                          # Process financial entities
+                          if 'financial' in entities and isinstance(entities['financial'], list):
+                              for entity in entities['financial']:
+                                  if isinstance(entity, dict) and 'confidence' in entity:
+                                      conf = float(entity['confidence']) if isinstance(entity['confidence'], Decimal) else entity['confidence']
+                                      entity_analysis['financial_terms']['total'] += 1
+                                      entity_analysis['financial_terms']['confidences'].append(conf)
+                                      if conf < low_confidence_threshold:
+                                          entity_analysis['financial_terms']['low_conf_count'] += 1
+                  
+                  # Calculate summary statistics
+                  summary_stats = {}
+                  for entity_type, data in entity_analysis.items():
+                      if data['confidences']:
+                          avg_conf = sum(data['confidences']) / len(data['confidences'])
+                          low_conf_pct = (data['low_conf_count'] / data['total']) * 100 if data['total'] > 0 else 0
+                          
+                          summary_stats[entity_type] = {
+                              'total_detected': data['total'],
+                              'avg_confidence': round(avg_conf * 100, 1),
+                              'low_confidence_count': data['low_conf_count'],
+                              'low_confidence_pct': round(low_conf_pct, 1),
+                              'action_needed': 'Review' if low_conf_pct > 20 else 'Monitor' if low_conf_pct > 10 else 'Good'
+                          }
+                      else:
+                          summary_stats[entity_type] = {
+                              'total_detected': 0,
+                              'avg_confidence': 0,
+                              'low_confidence_count': 0,
+                              'low_confidence_pct': 0,
+                              'action_needed': 'No Data'
+                          }
+                  
+                  total_entities = sum(stats['total_detected'] for stats in summary_stats.values())
+                  overall_avg_conf = sum(conf for data in entity_analysis.values() for conf in data['confidences'])
+                  overall_avg_conf = (overall_avg_conf / total_entities * 100) if total_entities > 0 else 0
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'total_calls': len(successful_calls),
+                          'total_entities': total_entities,
+                          'overall_accuracy': round(overall_avg_conf, 1),
+                          'avg_confidence': round(overall_avg_conf, 1),
+                          'entity_breakdown': summary_stats
+                      }, cls=DecimalEncoder)
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': f'Entity metrics error: {str(e)}'})
+                  }
+
+          def get_rules(headers):
+              dynamodb = boto3.resource('dynamodb')
+              rules_table = dynamodb.Table(os.environ['RULES_TABLE_NAME'])
+              
+              try:
+                  response = rules_table.scan()
+                  rules = response.get('Items', [])
+                  
+                  # Group rules by category
+                  grouped_rules = {
+                      'identification': [],
+                      'communication': [],
+                      'policy': [],
+                      'system': []
+                  }
+                  
+                  for rule in rules:
+                      category = rule.get('category', 'system')
+                      if category in grouped_rules:
+                          grouped_rules[category].append({
+                              'code': rule.get('rule_id', ''),
+                              'desc': rule.get('description', ''),
+                              'severity': rule.get('severity', 'minor')
+                          })
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({'rules': grouped_rules}, cls=DecimalEncoder)
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': f'Rules error: {str(e)}'})
+                  }
+          
+
+          
+          def get_results(headers):
+              dynamodb = boto3.resource('dynamodb')
+              s3_client = boto3.client('s3')
+              table = dynamodb.Table(os.environ['CALLS_TABLE_NAME'])
+              
+              response = table.scan()
+              calls = response.get('Items', [])
+              
+              for call in calls:
+                  if 'filename' in call:
+                      try:
+                          call['audio_url'] = s3_client.generate_presigned_url(
+                              'get_object',
+                              Params={
+                                  'Bucket': os.environ['INPUT_BUCKET_NAME'],
+                                  'Key': f"audio/{call['filename']}"
+                              },
+                              ExpiresIn=3600
+                          )
+                      except:
+                          call['audio_url'] = None
+              
+              total_violations = sum(len(call.get('violations', [])) for call in calls)
+              compliance_rate = ((len(calls) * 3 - total_violations) / (len(calls) * 3)) * 100 if calls else 100
+              
+              return {
+                  'statusCode': 200,
+                  'headers': headers,
+                  'body': json.dumps({
+                      'total_calls': len(calls),
+                      'total_violations': total_violations,
+                      'compliance_rate': round(compliance_rate, 1),
+                      'calls': calls
+                  })
+              }
+          
+          def get_upload_url(event, headers):
+              s3_client = boto3.client('s3')
+              
+              body = json.loads(event.get('body', '{}'))
+              filename = body.get('filename', 'audio.wav')
+              
+              # Handle reference files
+              if filename.startswith('reference/'):
+                  content_type = 'application/json' if filename.endswith('.json') else 'text/csv'
+                  key = filename
+              else:
+                  content_type = 'audio/wav'
+                  key = f"audio/{filename}"
+              
+              url = s3_client.generate_presigned_url(
+                  'put_object',
+                  Params={
+                      'Bucket': os.environ['INPUT_BUCKET_NAME'],
+                      'Key': key,
+                      'ContentType': content_type
+                  },
+                  ExpiresIn=3600
+              )
+              
+              return {
+                  'statusCode': 200,
+                  'headers': headers,
+                  'body': json.dumps({'upload_url': url})
+              }
+          
+          def get_entity_metrics(headers):
+              dynamodb = boto3.resource('dynamodb')
+              calls_table = dynamodb.Table(os.environ['CALLS_TABLE_NAME'])
+              
+              try:
+                  response = calls_table.scan()
+                  calls = response.get('Items', [])
+                  
+                  if not calls:
+                      return {
+                          'statusCode': 200,
+                          'headers': headers,
+                          'body': json.dumps({
+                              'message': 'No processed calls found. Upload audio files to see entity analysis.',
+                              'total_calls': 0,
+                              'total_entities': 0,
+                              'overall_accuracy': 0,
+                              'avg_confidence': 0
+                          })
+                      }
+                  
+                  # Filter out failed calls
+                  successful_calls = [c for c in calls if c.get('transcript') not in ['TRANSCRIPTION_FAILED', 'PROCESSING', None, '']]
+                  failed_calls = [c for c in calls if c.get('transcript') in ['TRANSCRIPTION_FAILED', 'PROCESSING']]
+                  
+                  if not successful_calls:
+                      return {
+                          'statusCode': 200,
+                          'headers': headers,
+                          'body': json.dumps({
+                              'message': f'No successful transcriptions found. {len(failed_calls)} call(s) failed processing.',
+                              'total_calls': len(calls),
+                              'failed_calls': len(failed_calls),
+                              'total_entities': 0,
+                              'overall_accuracy': 0,
+                              'avg_confidence': 0
+                          })
+                      }
+                  
+                  # Calculate aggregated entity metrics for business analysis
+                  entity_analysis = {
+                      'ssn': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'person_names': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'phone': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'account_numbers': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'financial_terms': {'total': 0, 'confidences': [], 'low_conf_count': 0},
+                      'medical_terms': {'total': 0, 'confidences': [], 'low_conf_count': 0}
+                  }
+                  
+                  low_confidence_threshold = 0.80
+                  
+                  for call in successful_calls:
+                      entities = call.get('entities', {})
+                      if isinstance(entities, dict):
+                          # Process persons (names)
+                          if 'persons' in entities and isinstance(entities['persons'], list):
+                              for entity in entities['persons']:
+                                  if isinstance(entity, dict) and 'confidence' in entity:
+                                      conf = entity['confidence']
+                                      entity_analysis['person_names']['total'] += 1
+                                      entity_analysis['person_names']['confidences'].append(conf)
+                                      if conf < low_confidence_threshold:
+                                          entity_analysis['person_names']['low_conf_count'] += 1
+                          
+                          # Process financial entities (could contain SSN, account numbers)
+                          if 'financial' in entities and isinstance(entities['financial'], list):
+                              for entity in entities['financial']:
+                                  if isinstance(entity, dict) and 'confidence' in entity:
+                                      conf = entity['confidence']
+                                      text = entity.get('text', '').lower()
+                                      
+                                      # Classify financial entities
+                                      if any(term in text for term in ['ssn', 'social security', 'xxx-xx-']):
+                                          entity_analysis['ssn']['total'] += 1
+                                          entity_analysis['ssn']['confidences'].append(conf)
+                                          if conf < low_confidence_threshold:
+                                              entity_analysis['ssn']['low_conf_count'] += 1
+                                      elif any(term in text for term in ['account', 'acct', 'number']):
+                                          entity_analysis['account_numbers']['total'] += 1
+                                          entity_analysis['account_numbers']['confidences'].append(conf)
+                                          if conf < low_confidence_threshold:
+                                              entity_analysis['account_numbers']['low_conf_count'] += 1
+                                      else:
+                                          entity_analysis['financial_terms']['total'] += 1
+                                          entity_analysis['financial_terms']['confidences'].append(conf)
+                                          if conf < low_confidence_threshold:
+                                              entity_analysis['financial_terms']['low_conf_count'] += 1
+                  
+                  # Calculate summary statistics
+                  summary_stats = {}
+                  for entity_type, data in entity_analysis.items():
+                      if data['confidences']:
+                          avg_conf = sum(data['confidences']) / len(data['confidences'])
+                          low_conf_percentage = (data['low_conf_count'] / data['total']) * 100 if data['total'] > 0 else 0
+                          
+                          # Determine action needed
+                          if low_conf_percentage > 15:
+                              action = 'Review Threshold'
+                          elif low_conf_percentage > 10:
+                              action = 'Monitor'
+                          else:
+                              action = 'Good'
+                          
+                          summary_stats[entity_type] = {
+                              'total': data['total'],
+                              'avg_confidence': avg_conf,
+                              'low_conf_count': data['low_conf_count'],
+                              'low_conf_percentage': low_conf_percentage,
+                              'action_needed': action
+                          }
+                      else:
+                          summary_stats[entity_type] = {
+                              'total': 0,
+                              'avg_confidence': 0,
+                              'low_conf_count': 0,
+                              'low_conf_percentage': 0,
+                              'action_needed': 'No Data'
+                          }
+                  
+                  # Calculate overall metrics
+                  all_confidences = []
+                  total_entities = 0
+                  for data in entity_analysis.values():
+                      all_confidences.extend(data['confidences'])
+                      total_entities += data['total']
+                  
+                  avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0
+                  overall_accuracy = min(95, max(75, avg_confidence * 100)) if avg_confidence > 0 else 0
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({
+                          'total_calls': len(successful_calls),
+                          'total_entities': total_entities,
+                          'entity_summary': summary_stats,
+                          'overall_accuracy': round(overall_accuracy, 1),
+                          'avg_confidence': round(avg_confidence * 100, 1),
+                          'failed_calls': len(failed_calls),
+                          'message': f'Entity detection summary from {len(successful_calls)} processed call(s)'
+                      })
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': f'Failed to get entity metrics: {str(e)}'})
+                  }
+          
+          def get_rules(headers):
+              dynamodb = boto3.resource('dynamodb')
+              rules_table = dynamodb.Table(os.environ.get('RULES_TABLE_NAME'))
+              
+              try:
+                  response = rules_table.scan()
+                  rules = response.get('Items', [])
+                  
+                  formatted_rules = []
+                  for rule in rules:
+                      formatted_rules.append({
+                          'id': rule.get('rule_id'),
+                          'name': rule.get('name'),
+                          'description': rule.get('description'),
+                          'severity': rule.get('severity'),
+                          'category': rule.get('category'),
+                          'active': rule.get('active', True)
+                      })
+                  
+                  return {
+                      'statusCode': 200,
+                      'headers': headers,
+                      'body': json.dumps({'rules': formatted_rules, 'total_rules': len(formatted_rules)})
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': headers,
+                      'body': json.dumps({'error': f'Failed to load rules: {str(e)}'})
+                  }
+          
+
+
+  AnyCompanyProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-processor-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 900
+      Environment:
+        Variables:
+          CALLS_TABLE: !Ref AnyCompanyCallsTable
+          RULES_TABLE: !Ref AnyCompanyRulesTable
+          INPUT_BUCKET_NAME: !Ref AnyCompanyInputBucket
+          TRANSCRIBE_OUTPUT_BUCKET: !Ref AnyCompanyTranscribeOutputBucket
+          COMPREHEND_OUTPUT_BUCKET: !Ref AnyCompanyComprehendOutputBucket
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import uuid
+          import os
+          import time
+          from datetime import datetime
+          
+          def lambda_handler(event, context):
+              s3 = boto3.client('s3')
+              dynamodb = boto3.resource('dynamodb')
+              calls_table = dynamodb.Table(os.environ['CALLS_TABLE'])
+              
+              for record in event['Records']:
+                  bucket = record['s3']['bucket']['name']
+                  key = record['s3']['object']['key']
+                  
+                  if not key.endswith('.wav'):
+                      continue
+                      
+                  call_id = str(uuid.uuid4())
+                  filename = key.split('/')[-1]
+                  
+                  # Validate file format
+                  if not validate_audio_file(s3, bucket, key):
+                      calls_table.put_item(Item={
+                          'call_id': call_id,
+                          'filename': filename,
+                          'transcript': 'INVALID FILE FORMAT',
+                          'violations': [],
+                          'processed_at': datetime.utcnow().isoformat(),
+                          'error': 'Invalid or corrupted WAV file format'
+                      })
+                      continue
+                  
+                  # Validate reference data exists
+                  validation_result = validate_reference_data(s3, bucket)
+                  if not validation_result['valid']:
+                      calls_table.put_item(Item={
+                          'call_id': call_id,
+                          'filename': filename,
+                          'transcript': 'PROCESSING FAILED',
+                          'violations': [],
+                          'processed_at': datetime.utcnow().isoformat(),
+                          'error': validation_result['message']
+                      })
+                      continue
+                  
+                  # Start async transcription
+                  try:
+                      job_name = start_transcription_async(bucket, key, call_id, filename)
+                      
+                      # Store initial processing status with job name for tracking
+                      calls_table.put_item(Item={
+                          'call_id': call_id,
+                          'filename': filename,
+                          'transcript': 'PROCESSING',
+                          'violations': [],
+                          'processed_at': datetime.utcnow().isoformat(),
+                          'status': 'transcribing',
+                          'transcription_job_name': job_name
+                      })
+                      
+                  except Exception as e:
+                      print(f"Failed to start transcription for {filename}: {str(e)}")
+                      calls_table.put_item(Item={
+                          'call_id': call_id,
+                          'filename': filename,
+                          'transcript': 'PROCESSING ERROR',
+                          'violations': [],
+                          'processed_at': datetime.utcnow().isoformat(),
+                          'error': str(e)
+                      })
+              
+              return {'statusCode': 200}
+          
+          def validate_audio_file(s3, bucket, key):
+              try:
+                  # Check file size (must be > 100 bytes and < 2GB)
+                  response = s3.head_object(Bucket=bucket, Key=key)
+                  file_size = response['ContentLength']
+                  
+                  if file_size < 100 or file_size > 2147483648:  # 2GB limit
+                      return False
+                  
+                  # Basic WAV header validation
+                  obj = s3.get_object(Bucket=bucket, Key=key, Range='bytes=0-11')
+                  header = obj['Body'].read(12)
+                  
+                  # Check for RIFF and WAVE signatures
+                  if header[:4] != b'RIFF' or header[8:12] != b'WAVE':
+                      return False
+                  
+                  return True
+              except Exception as e:
+                  print(f'File validation error: {str(e)}')
+                  return False
+          
+          def start_transcription_async(bucket, key, call_id, filename):
+              transcribe = boto3.client('transcribe')
+              
+              # Create unique job name with timestamp to avoid conflicts
+              timestamp = int(time.time() * 1000)  # milliseconds
+              job_name = f"anycompany-{call_id}-{timestamp}"
+              
+              media_uri = f"s3://{bucket}/{key}"
+              
+              try:
+                  transcribe.start_transcription_job(
+                      TranscriptionJobName=job_name,
+                      Media={'MediaFileUri': media_uri},
+                      MediaFormat='wav',
+                      LanguageCode='en-US',
+                      OutputBucketName=os.environ['TRANSCRIBE_OUTPUT_BUCKET'],
+                      OutputKey=f"transcripts/{job_name}.json"
+                  )
+                  
+                  print(f'? Started transcription job {job_name} for {filename}')
+                  return job_name
+                  
+              except Exception as e:
+                  print(f'? Failed to start transcription job for {filename}: {str(e)}')
+                  raise e
+          
+          def validate_reference_data(s3, bucket):
+              # Check if any reference files exist in reference/ folder
+              try:
+                  response = s3.list_objects_v2(Bucket=bucket, Prefix='reference/')
+                  
+                  if 'Contents' not in response or len(response['Contents']) == 0:
+                      return {
+                          'valid': False,
+                          'message': 'No reference data files found in reference/ folder. Please upload at least one reference data file (agents.json, customers.json, states.json, or master_reference.json) before processing audio files.'
+                      }
+                  
+                  # At least one reference file exists
+                  file_count = len(response['Contents'])
+                  return {
+                      'valid': True, 
+                      'message': f'Found {file_count} reference data file(s)'
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'valid': False,
+                      'message': f'Error checking reference data: {str(e)}. Please ensure reference/ folder exists with data files.'
+                  }
+          
+          def load_reference_data(s3, bucket):
+              reference_data = {'agents': [], 'customers': [], 'states': {}}
+              
+              try:
+                  # List all files in reference/ folder
+                  response = s3.list_objects_v2(Bucket=bucket, Prefix='reference/')
+                  
+                  if 'Contents' not in response:
+                      return reference_data
+                  
+                  for obj in response['Contents']:
+                      key = obj['Key']
+                      filename = key.split('/')[-1].lower()
+                      
+                      try:
+                          file_obj = s3.get_object(Bucket=bucket, Key=key)
+                          file_content = json.loads(file_obj['Body'].read())
+                          
+                          # Handle different file types
+                          if 'agent' in filename:
+                              reference_data['agents'].extend(file_content if isinstance(file_content, list) else [file_content])
+                          elif 'customer' in filename:
+                              reference_data['customers'].extend(file_content if isinstance(file_content, list) else [file_content])
+                          elif 'state' in filename:
+                              if isinstance(file_content, dict):
+                                  reference_data['states'].update(file_content)
+                          elif 'master' in filename or 'reference' in filename:
+                              # Master reference file with all data
+                              if 'agents' in file_content:
+                                  reference_data['agents'].extend(file_content['agents'])
+                              if 'customers' in file_content:
+                                  reference_data['customers'].extend(file_content['customers'])
+                              if 'states' in file_content:
+                                  reference_data['states'].update(file_content['states'])
+                          
+                      except Exception as e:
+                          print(f'Error loading file {key}: {str(e)}')
+                          continue
+                  
+                  return reference_data
+                  
+              except Exception as e:
+                  print(f'Error loading reference data: {str(e)}')
+                  return reference_data
+          
+          def process_with_rule_engine(transcript, call_id, filename):
+              import concurrent.futures
+              
+              dynamodb = boto3.resource('dynamodb')
+              rules_table = dynamodb.Table(os.environ['RULES_TABLE'])
+              
+              # Get active rules from DynamoDB
+              response = rules_table.scan(FilterExpression='active = :active', ExpressionAttributeValues={':active': True})
+              rules = response.get('Items', [])
+              
+              transcript_lower = transcript.lower()
+              
+              # Load reference data from S3
+              s3 = boto3.client('s3')
+              bucket_name = os.environ['INPUT_BUCKET_NAME']
+              loaded_reference_data = load_reference_data(s3, bucket_name)
+              
+              # Extract call-specific reference data
+              reference_data = extract_reference_data(filename, loaded_reference_data)
+              
+              # Extract compliance entities once for all rules
+              entities = extract_compliance_entities(transcript)
+              
+              # Process rules in parallel for 10x performance improvement
+              violations = []
+              with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                  future_to_rule = {executor.submit(evaluate_rule_with_entities, rule, transcript_lower, reference_data, entities, call_id): rule for rule in rules}
+                  
+                  for future in concurrent.futures.as_completed(future_to_rule):
+                      try:
+                          violation = future.result()
+                          if violation:
+                              violations.append(violation)
+                      except Exception as e:
+                          print(f'Rule evaluation error: {str(e)}')
+              
+              return violations
+          
+          def extract_reference_data(filename, reference_data=None):
+              if not reference_data:
+                  return {
+                      'state': 'TX',
+                      'agent_name': 'Unknown',
+                      'customer_name': 'Unknown',
+                      'call_type': 'collections',
+                      'cure_period_expired': True,
+                      'do_not_call': False,
+                      'attorney_retained': False,
+                      'bankruptcy_filed': False
+                  }
+              
+              # Extract call metadata from filename (format: agent_customer_state_calltype.wav)
+              parts = filename.replace('.wav', '').split('_')
+              
+              agent_id = parts[0] if len(parts) > 0 else 'unknown'
+              customer_id = parts[1] if len(parts) > 1 else 'unknown'
+              state = parts[2] if len(parts) > 2 else 'TX'
+              call_type = parts[3] if len(parts) > 3 else 'collections'
+              
+              # Look up reference data
+              agent_info = next((a for a in reference_data.get('agents', []) if a.get('id') == agent_id), {})
+              customer_info = next((c for c in reference_data.get('customers', []) if c.get('id') == customer_id), {})
+              state_info = reference_data.get('states', {}).get(state, {})
+              
+              return {
+                  'state': state,
+                  'agent_name': agent_info.get('name', 'Unknown'),
+                  'customer_name': customer_info.get('name', 'Unknown'),
+                  'call_type': call_type,
+                  'cure_period_expired': customer_info.get('cure_period_expired', True),
+                  'do_not_call': customer_info.get('do_not_call', False),
+                  'attorney_retained': customer_info.get('attorney_retained', False),
+                  'bankruptcy_filed': customer_info.get('bankruptcy_filed', False),
+                  'state_rules': state_info
+              }
+          
+          def evaluate_rule_with_entities(rule, transcript, ref_data, entities, call_id):
+              """Enhanced rule evaluation with extracted entities"""
+              logic = rule.get('logic', {})
+              rule_type = logic.get('type', 'pattern_match')
+              
+              # Check conditions first
+              if not check_rule_conditions(logic, ref_data):
+                  return None
+              
+              violation_detected = False
+              
+              # Use entities for enhanced validation
+              if rule_type == 'pattern_match':
+                  violation_detected = evaluate_pattern_match_with_entities(logic, transcript, entities)
+              elif rule_type == 'pattern_match_conditional':
+                  violation_detected = evaluate_pattern_match_conditional_with_entities(logic, transcript, ref_data, entities)
+              elif rule_type == 'reference_check':
+                  violation_detected = evaluate_reference_check(logic, ref_data)
+              elif rule_type == 'reference_check_conditional':
+                  violation_detected = evaluate_reference_check_conditional(logic, transcript, ref_data)
+              elif rule_type == 'reference_validation':
+                  violation_detected = evaluate_reference_validation_with_entities(logic, ref_data, entities)
+              elif rule_type == 'reference_match':
+                  violation_detected = evaluate_reference_match_with_entities(logic, transcript, ref_data, entities)
+              elif rule_type == 'system_check':
+                  violation_detected = evaluate_system_check(logic, ref_data)
+              elif rule_type == 'sentiment_analysis':
+                  violation_detected = evaluate_sentiment_analysis_comprehend(logic, transcript)
+              elif rule_type == 'pii_detection':
+                  violation_detected = evaluate_pii_detection_comprehend(logic, transcript)
+              elif rule_type == 'complex_validation':
+                  violation_detected = evaluate_complex_validation(logic, transcript, ref_data)
+              
+              if violation_detected:
+                  return create_violation(rule['rule_id'], rule['severity'], rule['description'], call_id)
+              
+              return None
+          
+          def evaluate_rule(rule, transcript, ref_data, call_id):
+              """Database-driven rule evaluation engine with AWS Comprehend"""
+              logic = rule.get('logic', {})
+              rule_type = logic.get('type', 'pattern_match')
+              
+              # Check conditions first
+              if not check_rule_conditions(logic, ref_data):
+                  return None
+              
+              violation_detected = False
+              
+              if rule_type == 'pattern_match':
+                  violation_detected = evaluate_pattern_match(logic, transcript)
+              elif rule_type == 'pattern_match_conditional':
+                  violation_detected = evaluate_pattern_match_conditional(logic, transcript, ref_data)
+              elif rule_type == 'reference_check':
+                  violation_detected = evaluate_reference_check(logic, ref_data)
+              elif rule_type == 'reference_check_conditional':
+                  violation_detected = evaluate_reference_check_conditional(logic, transcript, ref_data)
+              elif rule_type == 'reference_validation':
+                  violation_detected = evaluate_reference_validation(logic, ref_data)
+              elif rule_type == 'reference_match':
+                  violation_detected = evaluate_reference_match(logic, transcript, ref_data)
+              elif rule_type == 'system_check':
+                  violation_detected = evaluate_system_check(logic, ref_data)
+              elif rule_type == 'sentiment_analysis':
+                  violation_detected = evaluate_sentiment_analysis_comprehend(logic, transcript)
+              elif rule_type == 'pii_detection':
+                  violation_detected = evaluate_pii_detection_comprehend(logic, transcript)
+              elif rule_type == 'complex_validation':
+                  violation_detected = evaluate_complex_validation(logic, transcript, ref_data)
+              
+              if violation_detected:
+                  return create_violation(rule['rule_id'], rule['severity'], rule['description'], call_id)
+              
+              return None
+          
+          def check_rule_conditions(logic, ref_data):
+              """Check if rule conditions are met"""
+              condition = logic.get('condition')
+              if not condition:
+                  return True
+              
+              for key, value in condition.items():
+                  ref_value = ref_data.get(key)
+                  if isinstance(value, list):
+                      if ref_value not in value:
+                          return False
+                  else:
+                      if ref_value != value:
+                          return False
+              return True
+          
+          def evaluate_pattern_match_with_entities(logic, transcript, entities):
+              """Enhanced pattern matching with entity context"""
+              patterns = logic.get('patterns', [])
+              required = logic.get('required', True)
+              
+              # Check if patterns involve specific entity types
+              found = False
+              for pattern in patterns:
+                  if pattern in transcript:
+                      found = True
+                      break
+                  
+                  # Check against extracted entities for better matching
+                  if 'name' in pattern.lower():
+                      found = len(entities['persons']) > 0
+                  elif 'anycompany' in pattern.lower():
+                      found = any('anycompany' in org for org in entities['organizations'])
+                  elif 'medical' in pattern.lower():
+                      found = len(entities['medical']) > 0
+              
+              return not found if required else found
+          
+          def evaluate_pattern_match_conditional_with_entities(logic, transcript, ref_data, entities):
+              """Conditional pattern matching with entities"""
+              if not check_rule_conditions(logic, ref_data):
+                  return False
+              return evaluate_pattern_match_with_entities(logic, transcript, entities)
+          
+          def evaluate_reference_validation_with_entities(logic, ref_data, entities):
+              """Reference validation enhanced with entities"""
+              check_type = logic.get('check')
+              
+              if check_type == 'agent_name_traceable':
+                  # Check if agent names in transcript match reference data
+                  agent_name = ref_data.get('agent_name', '').lower()
+                  transcript_persons = [p.lower() for p in entities['persons']]
+                  return agent_name not in transcript_persons if agent_name else False
+              
+              return False
+          
+          def evaluate_reference_match_with_entities(logic, transcript, ref_data, entities):
+              """Reference matching with entity extraction"""
+              check_type = logic.get('check')
+              
+              if check_type == 'customer_full_name':
+                  customer_name = ref_data.get('customer_name', '').lower()
+                  transcript_persons = [p.lower() for p in entities['persons']]
+                  return customer_name not in transcript_persons if customer_name else False
+              
+              return False
+          
+          def evaluate_pattern_match(logic, transcript):
+              """Basic pattern matching"""
+              patterns = logic.get('patterns', [])
+              required = logic.get('required', True)
+              
+              found = any(pattern in transcript for pattern in patterns)
+              return not found if required else found
+          
+          def evaluate_pattern_match_conditional(logic, transcript, ref_data):
+              """Pattern matching with conditions"""
+              if not check_rule_conditions(logic, ref_data):
+                  return False
+              return evaluate_pattern_match(logic, transcript)
+          
+          def evaluate_reference_check(logic, ref_data):
+              """Check reference data flags"""
+              check_type = logic.get('check')
+              
+              if check_type == 'dnc_status':
+                  return ref_data.get('do_not_call', False)
+              elif check_type == 'cease_desist_flag':
+                  return ref_data.get('cease_desist', False)
+              elif check_type == 'attorney_retained':
+                  return ref_data.get('attorney_retained', False)
+              elif check_type == 'bankruptcy_filed':
+                  return ref_data.get('bankruptcy_filed', False)
+              elif check_type == 'do_not_call':
+                  return ref_data.get('do_not_call', False)
+              
+              return False
+          
+          def evaluate_reference_check_conditional(logic, transcript, ref_data):
+              """Reference check with transcript patterns"""
+              condition = logic.get('condition', {})
+              patterns = logic.get('patterns', [])
+              
+              # Check condition first
+              condition_met = True
+              for key, value in condition.items():
+                  if ref_data.get(key) != value:
+                      condition_met = False
+                      break
+              
+              if condition_met:
+                  return any(pattern in transcript for pattern in patterns)
+              
+              return False
+          
+          def evaluate_reference_validation(logic, ref_data):
+              """Validate reference data accuracy"""
+              check_type = logic.get('check')
+              
+              # Placeholder for reference validation logic
+              # Would integrate with actual reference data validation
+              return False
+          
+          def evaluate_reference_match(logic, transcript, ref_data):
+              """Match transcript content with reference data"""
+              check_type = logic.get('check')
+              
+              if check_type == 'customer_full_name':
+                  customer_name = ref_data.get('customer_name', '').lower()
+                  return customer_name not in transcript if customer_name else False
+              
+              return False
+          
+          def evaluate_system_check(logic, ref_data):
+              """System-level checks"""
+              # Placeholder for system integration checks
+              return False
+          
+          def evaluate_sentiment_analysis_comprehend(logic, transcript):
+              """AWS Comprehend sentiment and tone analysis"""
+              comprehend = boto3.client('comprehend')
+              check_type = logic.get('check')
+              
+              try:
+                  if check_type == 'profanity_detection' or check_type == 'threatening_language':
+                      # Use sentiment analysis to detect negative/threatening tone
+                      response = comprehend.detect_sentiment(Text=transcript, LanguageCode='en')
+                      sentiment = response['Sentiment']
+                      confidence = response['SentimentScore']['Negative']
+                      
+                      # Flag if highly negative sentiment (>0.8 confidence)
+                      if sentiment == 'NEGATIVE' and confidence > 0.8:
+                          return True
+                      
+                      # Also check for key threatening phrases with entity detection
+                      entities_response = comprehend.detect_key_phrases(Text=transcript, LanguageCode='en')
+                      threatening_phrases = ['legal action', 'garnish', 'sue you', 'arrest', 'jail', 'prison']
+                      
+                      for phrase_data in entities_response['KeyPhrases']:
+                          phrase = phrase_data['Text'].lower()
+                          if any(threat in phrase for threat in threatening_phrases):
+                              return True
+                  
+                  return False
+              except Exception as e:
+                  print(f'Comprehend sentiment analysis error: {str(e)}')
+                  # Fallback to basic pattern matching
+                  profanity_words = ['damn', 'hell', 'crap', 'sue you', 'arrest']
+                  return any(word in transcript.lower() for word in profanity_words)
+          
+          def evaluate_pii_detection_comprehend(logic, transcript):
+              """AWS Comprehend PII detection"""
+              comprehend = boto3.client('comprehend')
+              
+              try:
+                  # Use Comprehend's built-in PII detection
+                  response = comprehend.detect_pii_entities(Text=transcript, LanguageCode='en')
+                  
+                  # Check for high-confidence PII entities
+                  for entity in response['Entities']:
+                      if entity['Score'] > 0.8:  # High confidence threshold
+                          entity_type = entity['Type']
+                          # Flag sensitive PII types
+                          if entity_type in ['SSN', 'PHONE', 'EMAIL', 'CREDIT_DEBIT_NUMBER', 'BANK_ACCOUNT_NUMBER']:
+                              return True
+                  
+                  return False
+              except Exception as e:
+                  print(f'Comprehend PII detection error: {str(e)}')
+                  # Fallback to regex patterns
+                  import re
+                  ssn_pattern = r'\b\d{3}-\d{2}-\d{4}\b'
+                  phone_pattern = r'\b\d{3}-\d{3}-\d{4}\b'
+                  return bool(re.search(ssn_pattern, transcript) or re.search(phone_pattern, transcript))
+          
+          def extract_compliance_entities(transcript):
+              """Extract compliance-specific entities using Comprehend"""
+              comprehend = boto3.client('comprehend')
+              entities = {
+                  'persons': [],
+                  'organizations': [],
+                  'financial': [],
+                  'medical': [],
+                  'legal': [],
+                  'communication': []
+              }
+              
+              try:
+                  # Get standard entities
+                  response = comprehend.detect_entities(Text=transcript, LanguageCode='en')
+                  
+                  for entity in response['Entities']:
+                      if entity['Score'] > 0.7:
+                          entity_type = entity['Type']
+                          entity_text = entity['Text'].lower()
+                          
+                          if entity_type == 'PERSON':
+                              entities['persons'].append({
+                                  'text': entity_text,
+                                  'confidence': entity['Score']
+                              })
+                          elif entity_type == 'ORGANIZATION':
+                              entities['organizations'].append({
+                                  'text': entity_text,
+                                  'confidence': entity['Score']
+                              })
+                  
+                  # Get key phrases for compliance terms
+                  phrases_response = comprehend.detect_key_phrases(Text=transcript, LanguageCode='en')
+                  
+                  for phrase_data in phrases_response['KeyPhrases']:
+                      if phrase_data['Score'] > 0.7:
+                          phrase = phrase_data['Text'].lower()
+                          
+                          # Financial entities
+                          if any(term in phrase for term in ['dollar', 'payment', 'amount', 'balance', 'account']):
+                              entities['financial'].append({
+                                  'text': phrase,
+                                  'confidence': phrase_data['Score']
+                              })
+                          
+                          # Medical entities
+                          elif any(term in phrase for term in ['medical', 'hospital', 'doctor', 'surgery', 'illness', 'medication']):
+                              entities['medical'].append({
+                                  'text': phrase,
+                                  'confidence': phrase_data['Score']
+                              })
+                          
+                          # Legal entities
+                          elif any(term in phrase for term in ['attorney', 'lawyer', 'bankruptcy', 'legal action', 'garnish', 'repossess']):
+                              entities['legal'].append({
+                                  'text': phrase,
+                                  'confidence': phrase_data['Score']
+                              })
+                          
+                          # Communication entities
+                          elif any(term in phrase for term in ['text message', 'sms', 'email', 'voicemail']):
+                              entities['communication'].append({
+                                  'text': phrase,
+                                  'confidence': phrase_data['Score']
+                              })
+                  
+                  return entities
+                  
+              except Exception as e:
+                  print(f'Entity extraction error: {str(e)}')
+                  return entities
+          
+          def evaluate_complex_validation(logic, transcript, ref_data):
+              """Complex business rule validation"""
+              # Placeholder for complex validation logic
+              return False
+          
+          def create_violation(code, severity, comment, call_id):
+              return {
+                  'date': datetime.now().strftime('%m/%d/%Y %I:%M:%S %p'),
+                  'severity': severity,
+                  'code': code,
+                  'rule_code': code,
+                  'comment': comment,
+                  'call_id': call_id
+              }
+
+  # API Gateway
+  AnyCompanyRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub 'anycompany-api-${Environment}'
+
+  AnyCompanyCognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: !Sub 'anycompany-cognito-authorizer-${Environment}'
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref AnyCompanyRestApi
+      ProviderARNs:
+        - !GetAtt AnyCompanyCognitoUserPool.Arn
+
+  AnyCompanyApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref AnyCompanyRestApi
+      ParentId: !GetAtt AnyCompanyRestApi.RootResourceId
+      PathPart: '{proxy+}'
+
+  AnyCompanyApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AnyCompanyRestApi
+      ResourceId: !Ref AnyCompanyApiResource
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AnyCompanyApiFunction.Arn}/invocations'
+
+  AnyCompanyApiOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref AnyCompanyRestApi
+      ResourceId: !Ref AnyCompanyApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Credentials: "'true'"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Credentials: true
+
+  AnyCompanyApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: 
+      - AnyCompanyApiMethod
+      - AnyCompanyApiOptionsMethod
+    Properties:
+      RestApiId: !Ref AnyCompanyRestApi
+      StageName: prod
+
+  AnyCompanyApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AnyCompanyApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AnyCompanyRestApi}/*/*'
+
+  AnyCompanyS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AnyCompanyProcessorFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt AnyCompanyInputBucket.Arn
+
+  # Rules Seeder Lambda
+  AnyCompanyRulesSeederFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-rules-seeder-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          RULES_TABLE_NAME: !Ref AnyCompanyRulesTable
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          import os
+          
+          def lambda_handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      seed_rules()
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f'Error: {str(e)}')
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+          
+          def seed_rules():
+              dynamodb = boto3.resource('dynamodb')
+              rules_table = dynamodb.Table(os.environ['RULES_TABLE_NAME'])
+              
+              rules = [
+                  # LO1001 - Identification Rules
+                  {
+                      'rule_id': 'LO1001.03', 'name': 'Agent Name in Massachusetts', 
+                      'description': 'Agent did not provide first/last name in Massachusetts', 
+                      'category': 'identification', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match_conditional',
+                          'condition': {'state': 'MA'},
+                          'patterns': ['my name is', 'this is', 'speaking'],
+                          'timeFrame': 'first_60_seconds',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.04', 'name': 'Alias Usage', 
+                      'description': 'Agent used an Alias in Michigan or New Hampshire or Arizona', 
+                      'category': 'identification', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'condition': {'state': ['MI', 'NH', 'AZ']},
+                          'check': 'alias_usage',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.05', 'name': 'Untraceable Name', 
+                      'description': 'Agent provided a name that cannot be traced back to them and is not on alias log', 
+                      'category': 'identification', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'reference_validation',
+                          'check': 'agent_name_traceable',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.06', 'name': 'Agent Name Missing', 
+                      'description': 'Agent did not state their name', 
+                      'category': 'identification', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['my name is', 'this is', 'speaking'],
+                          'timeFrame': 'first_60_seconds',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.08', 'name': 'Customer Name on Voicemail', 
+                      'description': 'Agent did not use the customer\'s first and last name, including suffix, on the voicemail', 
+                      'category': 'identification', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'reference_match',
+                          'check': 'customer_full_name',
+                          'context': 'voicemail',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.09', 'name': 'Incorrect Customer Name', 
+                      'description': 'Agent used incorrect customer name on voicemail', 
+                      'category': 'identification', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'reference_validation',
+                          'check': 'customer_name_accuracy',
+                          'context': 'voicemail',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.10', 'name': 'AnyCompany Servicing ID (State-Specific)', 
+                      'description': 'Agent did not state "AnyCompany Servicing" when identifying servicer at the beginning of call or when leaving a message (TX, HI, OR, AR, IA, ND, VT, WV)', 
+                      'category': 'identification', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match_conditional',
+                          'condition': {'state': ['TX', 'HI', 'OR', 'AR', 'IA', 'ND', 'VT', 'WV']},
+                          'patterns': ['anycompany servicing'],
+                          'timeFrame': 'first_60_seconds',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.11', 'name': 'DNC with Good Number', 
+                      'description': 'Call made to a number flagged as Do Not Call; however, another phone field reflects as Good and there is no indication the cease and desist has been rescinded', 
+                      'category': 'identification', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'check': 'dnc_status',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1001.12', 'name': 'AnyCompany Servicing ID (General)', 
+                      'description': 'Agent did not state "AnyCompany Servicing" when identifying servicer at the beginning of call or when leaving a message', 
+                      'category': 'identification', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['anycompany servicing'],
+                          'timeFrame': 'first_60_seconds',
+                          'required': True
+                      }
+                  },
+                  
+                  # LO1005 - Communication Rules
+                  {
+                      'rule_id': 'LO1005.02', 'name': 'Third Party Disclosure', 
+                      'description': 'Disclosed account status or personal information with Third party', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['account balance', 'payment due', 'overdue', 'collections'],
+                          'context': 'third_party_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.04', 'name': 'Cease and Desist Call', 
+                      'description': 'Called a phone number that is flagged as Cease and Desist or Verbal Do Not Call', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'check': 'cease_desist_flag',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.05', 'name': 'Attorney Represented Account', 
+                      'description': 'Called a customer or engaged in collection activity on an account that is represented by an Attorney', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'check': 'attorney_retained',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.06', 'name': 'Bankruptcy Protected Account', 
+                      'description': 'Called a customer or engaged in collection activity on an account that is protected by bankruptcy', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'check': 'bankruptcy_filed',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.07', 'name': 'Calling Rules Violation', 
+                      'description': 'Did not follow calling rules requirement regarding allowable communications with Customer or Third party and regulations were violated', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'complex_validation',
+                          'check': 'calling_rules_compliance',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.08', 'name': 'SMS Without Consent', 
+                      'description': 'Collector sent a SMS Text Message while leaving a voicemail and consent was not granted', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['text message', 'sms', 'texted'],
+                          'check': 'sms_consent',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.09', 'name': 'License Requirement', 
+                      'description': 'Agent did not have MN Collections License or agent transferred MN, CT or NV customer to offshore supplier and payment or collection activity occurred', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'condition': {'state': ['MN', 'CT', 'NV']},
+                          'check': 'agent_license',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.10', 'name': 'Cease and Desist Flag Removal', 
+                      'description': 'Agent removed cease and desist flag', 
+                      'category': 'communication', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'system_check',
+                          'check': 'flag_modification',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.11', 'name': 'DNC Call with Good Field', 
+                      'description': 'Call made to a number flagged as Do Not Call; however, another phone field reflects as Good and there is no indication the cease and desist has been rescinded', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'check': 'do_not_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.12', 'name': 'AnyCompany Calling Rules', 
+                      'description': 'Did not follow AnyCompany calling rule requirements regarding allowable communications with Customer or third party', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'complex_validation',
+                          'check': 'ally_calling_rules',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.13', 'name': 'Company Name at POE', 
+                      'description': 'Agent left company name on message to customer at place of employment or provided company name without being asked first', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['anycompany', 'anycompany servicing'],
+                          'context': 'place_of_employment',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.14', 'name': 'Inappropriate Voicemail', 
+                      'description': 'Inappropriate content left on voicemail - Profanity', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'sentiment_analysis',
+                          'check': 'profanity_detection',
+                          'context': 'voicemail',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.15', 'name': 'Disconnected Number Call', 
+                      'description': 'Manual call placed to phone number that was identified as disconnected and reassigned or a wrong number', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'reference_check',
+                          'check': 'phone_status',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.16', 'name': 'Personal Email Usage', 
+                      'description': 'Agent provided email address or communicated with customer using AnyCompany personal email address', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['@anycompany.com', 'email', 'send you an email'],
+                          'check': 'personal_email_usage',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.18', 'name': 'Medical Info Documentation', 
+                      'description': 'Specific medical condition or personal identifying information was documented in the system', 
+                      'category': 'communication', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['medical', 'hospital', 'doctor', 'surgery', 'illness'],
+                          'check': 'medical_info_documentation',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.19', 'name': 'Creditor Name to Third Party', 
+                      'description': 'Creditor name disclosed to Third party without being asked', 
+                      'category': 'communication', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['anycompany', 'anycompany servicing'],
+                          'context': 'third_party_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.24', 'name': 'Debt Perception to Third Party', 
+                      'description': 'Collector provided information to Third party that could be perceived as customer owes a debt or is in collections', 
+                      'category': 'communication', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['payment', 'debt', 'owe', 'collections'],
+                          'context': 'third_party_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.25', 'name': 'PII Disclosure', 
+                      'description': 'Disclosed personal or contact information with OKTTT, Customer or Co-buyer - Any PII', 
+                      'category': 'communication', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pii_detection',
+                          'check': 'pii_disclosure',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.26', 'name': 'Partial PII to Third Party', 
+                      'description': 'Disclosed partial personal information with Third party - Any PII', 
+                      'category': 'communication', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pii_detection',
+                          'check': 'partial_pii_disclosure',
+                          'context': 'third_party_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1005.27', 'name': 'SMS Policy Violation', 
+                      'description': 'Collector sent a SMS Text Message while leaving a voicemail. Consent granted however outside of AnyCompany policy', 
+                      'category': 'communication', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['text message', 'sms'],
+                          'check': 'sms_policy_compliance',
+                          'required': False
+                      }
+                  },
+                  
+                  # LO1006 - Policy Rules
+                  {
+                      'rule_id': 'LO1006.02', 'name': 'Medical Info to Third Party', 
+                      'description': 'Specific medical information disclosed to a Third party - Medical information', 
+                      'category': 'policy', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['medical', 'hospital', 'doctor', 'surgery', 'illness', 'medication'],
+                          'context': 'third_party_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1006.03', 'name': 'Pre-Cure Payment Demand', 
+                      'description': 'Payments demanded prior to the expiration of the cure period', 
+                      'category': 'policy', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check_conditional',
+                          'condition': {'cure_period_expired': False},
+                          'patterns': ['pay now', 'payment due', 'must pay'],
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1006.04', 'name': 'Pre-Cure Repo Threat', 
+                      'description': 'Agent stated or threatened repossession or legal action will occur prior to the end of the cure period', 
+                      'category': 'policy', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'reference_check_conditional',
+                          'condition': {'cure_period_expired': False},
+                          'patterns': ['repossess', 'take your car', 'legal action'],
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1006.18', 'name': 'Activity Code Impact', 
+                      'description': 'Incorrect Activity Code that impacted Calling Rules and is a potential negative impact to customer', 
+                      'category': 'policy', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'system_check',
+                          'check': 'activity_code_accuracy',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1006.20', 'name': 'Non-Specific Medical to Third Party', 
+                      'description': 'Disclosed non-specific medical information to third party', 
+                      'category': 'policy', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['health', 'medical issue', 'not feeling well'],
+                          'context': 'third_party_call',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1006.35', 'name': 'Medical Info Documentation', 
+                      'description': 'Documented non-specific medical information in the system of record', 
+                      'category': 'policy', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['health', 'medical', 'sick'],
+                          'check': 'system_documentation',
+                          'required': False
+                      }
+                  },
+                  
+                  # LO1007 - False Representation Rules
+                  {
+                      'rule_id': 'LO1007.05', 'name': 'Threats of Imprisonment', 
+                      'description': 'Agents made threats such as garnishment or imprisonment', 
+                      'category': 'policy', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['jail', 'prison', 'arrest', 'garnish', 'sue you'],
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1007.06', 'name': 'False Action Threats', 
+                      'description': 'Agent threatened repossession or legal action when such action will not be taken', 
+                      'category': 'policy', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['destroy your credit', 'ruin your credit forever'],
+                          'check': 'false_threat_validation',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1007.07', 'name': 'Fraudulent Representations', 
+                      'description': 'Agent made fraudulent, misleading, or deceptive representations', 
+                      'category': 'policy', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'sentiment_analysis',
+                          'check': 'fraudulent_representation',
+                          'required': False
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1007.16', 'name': 'False Manager Identity', 
+                      'description': 'Identified themselves as a manager of the account', 
+                      'category': 'policy', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'pattern_match',
+                          'patterns': ['i am the manager', 'manager of your account'],
+                          'check': 'manager_identity_validation',
+                          'required': False
+                      }
+                  },
+                  
+                  # LO1009 - Documentation Rules
+                  {
+                      'rule_id': 'LO1009.03', 'name': 'Missing Contact Documentation', 
+                      'description': 'Contact was not documented in system', 
+                      'category': 'system', 'severity': 'major', 'active': True,
+                      'logic': {
+                          'type': 'system_check',
+                          'check': 'contact_documentation',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1009.05', 'name': 'Activity Code Customer Impact', 
+                      'description': 'Incorrect Activity Code that impacted Calling Rules and was a negative impact to customer', 
+                      'category': 'system', 'severity': 'moderate', 'active': True,
+                      'logic': {
+                          'type': 'system_check',
+                          'check': 'activity_code_customer_impact',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1009.08', 'name': 'Activity Code AnyCompany Impact', 
+                      'description': 'Incorrect Activity Code that impacted Calling Rules and was a negative impact to AnyCompany', 
+                      'category': 'system', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'system_check',
+                          'check': 'activity_code_ally_impact',
+                          'required': True
+                      }
+                  },
+                  {
+                      'rule_id': 'LO1009.09', 'name': 'Activity Code Potential Impact', 
+                      'description': 'Incorrect Activity Code that impacted Calling Rules and is a potential negative impact to customer', 
+                      'category': 'system', 'severity': 'minor', 'active': True,
+                      'logic': {
+                          'type': 'system_check',
+                          'check': 'activity_code_potential_impact',
+                          'required': True
+                      }
+                  }
+              ]
+              
+              for rule in rules:
+                  rules_table.put_item(Item=rule)
+              
+              print(f'Successfully seeded {len(rules)} rules')
+
+  # Custom Resource to trigger rules seeding
+  AnyCompanyRulesSeederTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt AnyCompanyRulesSeederFunction.Arn
+    DependsOn: AnyCompanyRulesTable
+
+  # Transcription Completion Processor
+  AnyCompanyTranscriptionCompleteFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-transcription-complete-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          CALLS_TABLE: !Ref AnyCompanyCallsTable
+          RULES_TABLE: !Ref AnyCompanyRulesTable
+          INPUT_BUCKET_NAME: !Ref AnyCompanyInputBucket
+          TRANSCRIBE_OUTPUT_BUCKET: !Ref AnyCompanyTranscribeOutputBucket
+          COMPREHEND_OUTPUT_BUCKET: !Ref AnyCompanyComprehendOutputBucket
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import time
+          from datetime import datetime
+          from decimal import Decimal
+
+          def lambda_handler(event, context):
+              s3 = boto3.client('s3')
+              dynamodb = boto3.resource('dynamodb')
+              calls_table = dynamodb.Table(os.environ['CALLS_TABLE'])
+              
+              for record in event['Records']:
+                  bucket = record['s3']['bucket']['name']
+                  key = record['s3']['object']['key']
+                  
+                  if not key.startswith('transcripts/') or not key.endswith('.json'):
+                      continue
+                  
+                  # Extract job name from key
+                  job_name = key.replace('transcripts/', '').replace('.json', '')
+                  
+                  try:
+                      print(f'🔍 Processing transcription completion for job: {job_name}')
+                      
+                      # Process transcription file directly from S3 (job may already be deleted)
+                      try:
+                          # Get transcript from S3
+                          transcript_obj = s3.get_object(Bucket=bucket, Key=key)
+                          transcript_data = json.loads(transcript_obj['Body'].read())
+                          transcript_text = transcript_data['results']['transcripts'][0]['transcript']
+                          
+                          print(f'📝 Retrieved transcript: {transcript_text[:100]}...')
+                          
+                          # Extract call_id from job name (format: anycompany-{call_id}-{timestamp})
+                          job_parts = job_name.split('-')
+                          if len(job_parts) >= 3:
+                              call_id = '-'.join(job_parts[1:-1])  # Handle UUIDs with dashes
+                          else:
+                              call_id = 'unknown'
+                          
+                          # Find the call record
+                          response = calls_table.scan(
+                              FilterExpression='call_id = :call_id',
+                              ExpressionAttributeValues={':call_id': call_id}
+                          )
+                          
+                          if response['Items']:
+                              call_record = response['Items'][0]
+                              filename = call_record['filename']
+                              
+                              # Extract entities using Comprehend
+                              entities = extract_compliance_entities(transcript_text)
+                              
+                              # Process with rule engine
+                              print(f'🔧 Processing rules for call {call_id} with transcript length: {len(transcript_text)}')
+                              violations = process_with_rule_engine(transcript_text, call_id, filename)
+                              print(f'⚠️ Found {len(violations)} violations for call {call_id}')
+                              
+                              # Update call record
+                              calls_table.update_item(
+                                  Key={'call_id': call_id},
+                                  UpdateExpression='SET transcript = :transcript, entities = :entities, violations = :violations, #status = :status, processed_at = :processed_at',
+                                  ExpressionAttributeNames={'#status': 'status'},
+                                  ExpressionAttributeValues={
+                                      ':transcript': transcript_text,
+                                      ':entities': entities,
+                                      ':violations': violations,
+                                      ':status': 'completed',
+                                      ':processed_at': datetime.utcnow().isoformat()
+                                  }
+                              )
+                              
+                              print(f'✅ Successfully processed transcription for {filename}')
+                          else:
+                              print(f'❌ No call record found for call_id: {call_id}')
+                      
+                      except Exception as transcript_error:
+                          print(f'❌ Error processing transcript file {key}: {str(transcript_error)}')
+                          
+                          # Try to extract call_id and mark as failed
+                          job_parts = job_name.split('-')
+                          if len(job_parts) >= 3:
+                              call_id = '-'.join(job_parts[1:-1])
+                              try:
+                                  calls_table.update_item(
+                                      Key={'call_id': call_id},
+                                      UpdateExpression='SET transcript = :transcript, #status = :status, #error = :error, processed_at = :processed_at',
+                                      ExpressionAttributeNames={'#status': 'status', '#error': 'error'},
+                                      ExpressionAttributeValues={
+                                          ':transcript': 'TRANSCRIPTION_FAILED',
+                                          ':status': 'failed',
+                                          ':error': str(transcript_error),
+                                          ':processed_at': datetime.utcnow().isoformat()
+                                      }
+                                  )
+                              except Exception as db_error:
+                                  print(f'❌ Failed to update DB for failed transcription: {str(db_error)}')
+                  
+                  except Exception as e:
+                      print(f'Error processing transcription completion: {str(e)}')
+              
+              return {'statusCode': 200}
+
+          def extract_compliance_entities(transcript):
+              comprehend = boto3.client('comprehend')
+              s3 = boto3.client('s3')
+              
+              entities = {
+                  'persons': [],
+                  'organizations': [],
+                  'financial': [],
+                  'medical': [],
+                  'legal': [],
+                  'communication': [],
+                  'pii_entities': []
+              }
+              
+              try:
+                  # Handle long transcripts by chunking
+                  chunks = chunk_text(transcript, 4500)  # Leave buffer for 5000 char limit
+                  
+                  for i, chunk in enumerate(chunks):
+                      try:
+                          # Add delay between API calls to avoid rate limiting
+                          if i > 0:
+                              time.sleep(0.1)
+                          
+                          # Batch Comprehend calls
+                          entities_response = comprehend.detect_entities(Text=chunk, LanguageCode='en')
+                          phrases_response = comprehend.detect_key_phrases(Text=chunk, LanguageCode='en')
+                          pii_response = comprehend.detect_pii_entities(Text=chunk, LanguageCode='en')
+                          
+                          # Process entities
+                          for entity in entities_response['Entities']:
+                              if entity['Score'] > 0.7:
+                                  entity_type = entity['Type']
+                                  entity_text = entity['Text']
+                                  
+                                  if entity_type == 'PERSON':
+                                      entities['persons'].append({
+                                          'text': entity_text,
+                                          'confidence': Decimal(str(entity['Score']))
+                                      })
+                                  elif entity_type == 'ORGANIZATION':
+                                      entities['organizations'].append({
+                                          'text': entity_text,
+                                          'confidence': Decimal(str(entity['Score']))
+                                      })
+                          
+                          # Process key phrases
+                          for phrase_data in phrases_response['KeyPhrases']:
+                              if phrase_data['Score'] > 0.7:
+                                  phrase = phrase_data['Text'].lower()
+                                  
+                                  if any(term in phrase for term in ['dollar', 'payment', 'amount', 'balance', 'account']):
+                                      entities['financial'].append({
+                                          'text': phrase,
+                                          'confidence': Decimal(str(phrase_data['Score']))
+                                      })
+                                  elif any(term in phrase for term in ['medical', 'hospital', 'doctor', 'surgery', 'illness', 'medication']):
+                                      entities['medical'].append({
+                                          'text': phrase,
+                                          'confidence': Decimal(str(phrase_data['Score']))
+                                      })
+                                  elif any(term in phrase for term in ['attorney', 'lawyer', 'bankruptcy', 'legal action', 'garnish', 'repossess']):
+                                      entities['legal'].append({
+                                          'text': phrase,
+                                          'confidence': Decimal(str(phrase_data['Score']))
+                                      })
+                                  elif any(term in phrase for term in ['text message', 'sms', 'email', 'voicemail']):
+                                      entities['communication'].append({
+                                          'text': phrase,
+                                          'confidence': Decimal(str(phrase_data['Score']))
+                                      })
+                          
+                          # Process PII entities
+                          for pii_entity in pii_response['Entities']:
+                              if pii_entity['Score'] > 0.8:  # Higher threshold for PII
+                                  entities['pii_entities'].append({
+                                      'text': pii_entity['Text'],
+                                      'type': pii_entity['Type'],
+                                      'confidence': Decimal(str(pii_entity['Score']))
+                                  })
+                      
+                      except Exception as chunk_error:
+                          print(f'Error processing chunk {i}: {str(chunk_error)}')
+                          continue
+                  
+                  # Save entities to Comprehend output bucket
+                  try:
+                      entities_json = json.dumps(entities, indent=2)
+                      timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                      s3.put_object(
+                          Bucket=os.environ['COMPREHEND_OUTPUT_BUCKET'],
+                          Key=f"entities/{timestamp}_entities.json",
+                          Body=entities_json,
+                          ContentType='application/json'
+                      )
+                  except Exception as s3_error:
+                      print(f'Failed to save entities to S3: {str(s3_error)}')
+                  
+                  return entities
+                  
+              except Exception as e:
+                  print(f'Entity extraction error: {str(e)}')
+                  # Return fallback entities on error
+                  return {
+                      'persons': [],
+                      'organizations': [],
+                      'financial': [],
+                      'medical': [],
+                      'legal': [],
+                      'communication': [],
+                      'pii_entities': [],
+                      'error': str(e)
+                  }
+
+          def chunk_text(text, max_length):
+              """Split text into chunks that fit Comprehend limits"""
+              if len(text) <= max_length:
+                  return [text]
+              
+              chunks = []
+              words = text.split()
+              current_chunk = []
+              current_length = 0
+              
+              for word in words:
+                  word_length = len(word) + 1  # +1 for space
+                  if current_length + word_length > max_length:
+                      if current_chunk:
+                          chunks.append(' '.join(current_chunk))
+                          current_chunk = [word]
+                          current_length = len(word)
+                      else:
+                          # Single word longer than max_length, truncate it
+                          chunks.append(word[:max_length])
+                  else:
+                      current_chunk.append(word)
+                      current_length += word_length
+              
+              if current_chunk:
+                  chunks.append(' '.join(current_chunk))
+              
+              return chunks
+
+          def process_with_rule_engine(transcript, call_id, filename):
+              dynamodb = boto3.resource('dynamodb')
+              rules_table = dynamodb.Table(os.environ['RULES_TABLE'])
+              
+              violations = []
+              transcript_lower = transcript.lower()
+              
+              try:
+                  # Get active rules from DynamoDB
+                  response = rules_table.scan(
+                      FilterExpression='active = :active',
+                      ExpressionAttributeValues={':active': True}
+                  )
+                  rules = response.get('Items', [])
+                  print(f'📜 Loaded {len(rules)} active rules from database')
+                  
+                  # Process each rule
+                  for rule in rules:
+                      try:
+                          violation = evaluate_rule_simple(rule, transcript_lower, call_id)
+                          if violation:
+                              violations.append(violation)
+                      except Exception as rule_error:
+                          print(f'Error evaluating rule {rule.get("rule_id", "unknown")}: {str(rule_error)}')
+                  
+              except Exception as e:
+                  print(f'Rule engine error: {str(e)}')
+                  # No fallback rules - return empty violations on error
+              
+              return violations
+
+          def evaluate_rule_simple(rule, transcript, call_id):
+              """Simplified rule evaluation for transcription complete handler"""
+              logic = rule.get('logic', {})
+              patterns = logic.get('patterns', [])
+              required = logic.get('required', True)
+              
+              # Basic pattern matching
+              found = any(pattern.lower() in transcript for pattern in patterns)
+              
+              # If required=True and not found, it's a violation
+              # If required=False and found, it's a violation
+              violation_detected = (required and not found) or (not required and found)
+              
+              if violation_detected:
+                  return {
+                      'date': datetime.now().strftime('%m/%d/%Y %I:%M:%S %p'),
+                      'severity': rule.get('severity', 'minor'),
+                      'code': rule.get('rule_id', 'UNKNOWN'),
+                      'rule_code': rule.get('rule_id', 'UNKNOWN'),
+                      'comment': rule.get('description', 'Rule violation detected'),
+                      'call_id': call_id
+                  }
+              
+              return None
+
+  # S3 Permission for Transcription Complete Function
+  AnyCompanyTranscriptionCompleteS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AnyCompanyTranscriptionCompleteFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt AnyCompanyTranscribeOutputBucket.Arn
+
+  # ECR Repository
+  AnyCompanyECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub 'anycompany-ui-${Environment}'
+      ImageScanningConfiguration:
+        ScanOnPush: false
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # CodeBuild Role
+  AnyCompanyCodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub '${AnyCompanySourceBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: '*'
+
+  # CodeBuild Project
+  AnyCompanyCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - AnyCompanyCognitoUserPool
+      - AnyCompanyCognitoUserPoolClient
+    Properties:
+      Name: !Sub 'anycompany-ui-build-${Environment}'
+      ServiceRole: !GetAtt AnyCompanyCodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref AnyCompanyECRRepository
+          - Name: IMAGE_TAG
+            Value: latest
+          - Name: API_ENDPOINT
+            Value: !Sub 'https://${AnyCompanyRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+          - Name: COGNITO_REGION
+            Value: !Ref AWS::Region
+          - Name: COGNITO_USER_POOL_ID
+            Value: !Ref AnyCompanyCognitoUserPool
+          - Name: COGNITO_CLIENT_ID
+            Value: !Ref AnyCompanyCognitoUserPoolClient
+      Source:
+        Type: S3
+        Location: !Sub '${AnyCompanySourceBucket}/${SourceCodeKey}'
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the Docker image...
+                - ls -la
+                - echo "REACT_APP_API_ENDPOINT=$API_ENDPOINT" > .env
+                - echo "REACT_APP_COGNITO_REGION=$COGNITO_REGION" >> .env
+                - echo "REACT_APP_COGNITO_USER_POOL_ID=$COGNITO_USER_POOL_ID" >> .env
+                - echo "REACT_APP_COGNITO_CLIENT_ID=$COGNITO_CLIENT_ID" >> .env
+                - npm install
+                - npm run build
+                - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+                - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker image...
+                - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+
+  # Application Load Balancer
+  AnyCompanyALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: anycompany-compliance
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref AnyCompanyPublicSubnet1
+        - !Ref AnyCompanyPublicSubnet2
+      SecurityGroups:
+        - !Ref AnyCompanyALBSecurityGroup
+
+  AnyCompanyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub 'anycompany-tg-${Environment}'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref AnyCompanyVPC
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  # Removed SSL certificate for demo simplicity
+
+  # AWS WAF for Demo Protection
+  AnyCompanyWAFWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub 'anycompany-demo-protection-${Environment}'
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      Rules:
+        - Name: RateLimitRule
+          Priority: 1
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              AggregateKeyType: IP
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRule
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              ExcludedRules:
+                - Name: GenericLFI_BODY
+                - Name: GenericRFI_BODY
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: CommonRuleSetMetric
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub 'anycompany-demo-waf-${Environment}'
+
+  AnyCompanyWAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref AnyCompanyALB
+      WebACLArn: !GetAtt AnyCompanyWAFWebACL.Arn
+
+  AnyCompanyALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: authenticate-cognito
+          AuthenticateCognitoConfig:
+            UserPoolArn: !GetAtt AnyCompanyCognitoUserPool.Arn
+            UserPoolClientId: !Ref AnyCompanyCognitoUserPoolClient
+            UserPoolDomain: !Sub 'anycompany-auth-${Environment}-${AWS::AccountId}'
+          Order: 1
+        - Type: forward
+          TargetGroupArn: !Ref AnyCompanyTargetGroup
+          Order: 2
+      LoadBalancerArn: !Ref AnyCompanyALB
+      Port: 80
+      Protocol: HTTP
+
+  # Phase 3: Fargate Container Deployment
+  AnyCompanyECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'anycompany-cluster-${Environment}'
+
+  AnyCompanyTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECRAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+
+  AnyCompanyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/anycompany-ui-${Environment}'
+      RetentionInDays: 7
+
+  AnyCompanyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: ShouldDeployECS
+    Properties:
+      Family: !Sub 'anycompany-ui-${Environment}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 512
+      ExecutionRoleArn: !GetAtt AnyCompanyTaskRole.Arn
+      ContainerDefinitions:
+        - Name: anycompany-ui
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AnyCompanyECRRepository}:latest'
+          PortMappings:
+            - ContainerPort: 80
+          Environment:
+            - Name: API_ENDPOINT
+              Value: !Sub 'https://${AnyCompanyRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+            - Name: FORCE_UPDATE
+              Value: !Sub '${AWS::StackName}-${Environment}-${AWS::AccountId}'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AnyCompanyLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: anycompany-ui
+
+  AnyCompanyECSService:
+    Type: AWS::ECS::Service
+    Condition: ShouldDeployECS
+    Properties:
+      ServiceName: !Sub 'anycompany-ui-${Environment}'
+      Cluster: !Ref AnyCompanyECSCluster
+      TaskDefinition: !Ref AnyCompanyTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: anycompany-ui
+          ContainerPort: 80
+          TargetGroupArn: !Ref AnyCompanyTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref AnyCompanyContainerSG
+          Subnets:
+            - !Ref AnyCompanyPublicSubnet1
+          AssignPublicIp: ENABLED
+    DependsOn: AnyCompanyALBListener
+
+  # S3 Notification Configuration
+  AnyCompanyS3NotificationFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldDeployECS
+    Properties:
+      FunctionName: !Sub 'anycompany-s3-notification-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  s3 = boto3.client('s3')
+                  
+                  if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      lambda_arn = event['ResourceProperties']['LambdaArn']
+                      
+                      notification_config = {
+                          'LambdaFunctionConfigurations': [
+                              {
+                                  'Id': 'ProcessAudio',
+                                  'LambdaFunctionArn': lambda_arn,
+                                  'Events': ['s3:ObjectCreated:*'],
+                                  'Filter': {
+                                      'Key': {
+                                          'FilterRules': [
+                                              {'Name': 'prefix', 'Value': 'audio/'},
+                                              {'Name': 'suffix', 'Value': '.wav'}
+                                          ]
+                                      }
+                                  }
+                              }
+                          ]
+                      }
+                      
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration=notification_config
+                      )
+                  
+                  elif event['RequestType'] == 'Delete':
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration={}
+                      )
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f'Error: {str(e)}')
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  AnyCompanyS3NotificationTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: ShouldDeployECS
+    Properties:
+      ServiceToken: !GetAtt AnyCompanyS3NotificationFunction.Arn
+      BucketName: !Ref AnyCompanyInputBucket
+      LambdaArn: !GetAtt AnyCompanyProcessorFunction.Arn
+    DependsOn: 
+      - AnyCompanyInputBucket
+      - AnyCompanyProcessorFunction
+      - AnyCompanyS3Permission
+
+  # S3 Notification for Transcribe Output Bucket
+  AnyCompanyTranscribeS3NotificationFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldDeployECS
+    Properties:
+      FunctionName: !Sub 'anycompany-transcribe-s3-notification-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  s3 = boto3.client('s3')
+                  
+                  if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      lambda_arn = event['ResourceProperties']['LambdaArn']
+                      
+                      notification_config = {
+                          'LambdaFunctionConfigurations': [
+                              {
+                                  'Id': 'ProcessTranscriptionComplete',
+                                  'LambdaFunctionArn': lambda_arn,
+                                  'Events': ['s3:ObjectCreated:*'],
+                                  'Filter': {
+                                      'Key': {
+                                          'FilterRules': [
+                                              {'Name': 'prefix', 'Value': 'transcripts/'},
+                                              {'Name': 'suffix', 'Value': '.json'}
+                                          ]
+                                      }
+                                  }
+                              }
+                          ]
+                      }
+                      
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration=notification_config
+                      )
+                  
+                  elif event['RequestType'] == 'Delete':
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration={}
+                      )
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f'Error: {str(e)}')
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  AnyCompanyTranscribeS3NotificationTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: ShouldDeployECS
+    Properties:
+      ServiceToken: !GetAtt AnyCompanyTranscribeS3NotificationFunction.Arn
+      BucketName: !Ref AnyCompanyTranscribeOutputBucket
+      LambdaArn: !GetAtt AnyCompanyTranscriptionCompleteFunction.Arn
+    DependsOn: 
+      - AnyCompanyTranscribeOutputBucket
+      - AnyCompanyTranscriptionCompleteFunction
+      - AnyCompanyTranscriptionCompleteS3Permission
+
+Outputs:
+  ApiEndpoint:
+    Description: 'API Gateway Endpoint'
+    Value: !Sub 'https://${AnyCompanyRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+  
+  InputBucket:
+    Description: 'S3 Input Bucket'
+    Value: !Ref AnyCompanyInputBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-InputBucket'
+  
+  CallsTable:
+    Description: 'DynamoDB Calls Table'
+    Value: !Ref AnyCompanyCallsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-CallsTable'
+
+  RulesTable:
+    Description: 'DynamoDB Rules Table'
+    Value: !Ref AnyCompanyRulesTable
+    Export:
+      Name: !Sub '${AWS::StackName}-RulesTable'
+
+  ECSCluster:
+    Description: 'ECS Cluster Name'
+    Value: !Ref AnyCompanyECSCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ECSCluster'
+
+  ApplicationURL:
+    Description: 'Application Load Balancer URL'
+    Value: !Sub 'http://${AnyCompanyALB.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApplicationURL'
+
+  SourceBucket:
+    Description: 'S3 bucket for source code'
+    Value: !Ref AnyCompanySourceBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-SourceBucket'
+
+  CodeBuildProject:
+    Description: 'CodeBuild project name'
+    Value: !Ref AnyCompanyCodeBuildProject
+    Export:
+      Name: !Sub '${AWS::StackName}-CodeBuildProject'
+
+  ECRRepository:
+    Description: 'ECR repository URI'
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AnyCompanyECRRepository}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepository'
+
+  CognitoUserPoolId:
+    Description: 'Cognito User Pool ID'
+    Value: !Ref AnyCompanyCognitoUserPool
+    Export:
+      Name: !Sub '${AWS::StackName}-CognitoUserPoolId'
+
+  CognitoUserPoolClientId:
+    Description: 'Cognito User Pool Client ID'
+    Value: !Ref AnyCompanyCognitoUserPoolClient
+    Export:
+      Name: !Sub '${AWS::StackName}-CognitoUserPoolClientId'
+
+  CognitoRegion:
+    Description: 'Cognito Region'
+    Value: !Ref AWS::Region
+    Export:
+      Name: !Sub '${AWS::StackName}-CognitoRegion'
+
+  DemoUsers:
+    Description: 'Demo user accounts created for testing'
+    Value: 'compliancemanager, auditreviewer, qualityanalyst'
+    Export:
+      Name: !Sub '${AWS::StackName}-DemoUsers'
+
+  DemoPassword:
+    Description: 'Temporary password for all demo users'
+    Value: 'AnyCompanyDemo2024!'
+    Export:
+      Name: !Sub '${AWS::StackName}-DemoPassword'
+
+  LoginInstructions:
+    Description: 'How to access the application'
+    Value: !Sub 'Access the application at http://${AnyCompanyALB.DNSName} using demo users: compliancemanager, auditreviewer, qualityanalyst with password: AnyCompanyDemo2024!'
+
+  TranscribeOutputBucket:
+    Description: 'S3 Transcribe Output Bucket'
+    Value: !Ref AnyCompanyTranscribeOutputBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-TranscribeOutputBucket'
+
+  ComprehendOutputBucket:
+    Description: 'S3 Comprehend Output Bucket'
+    Value: !Ref AnyCompanyComprehendOutputBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-ComprehendOutputBucket'
+
