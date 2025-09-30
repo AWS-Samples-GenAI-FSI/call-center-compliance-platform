@@ -169,13 +169,6 @@ Choose from deployment options:
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
 
-## ⚠️ Important Notes
-
-1. **Do NOT redeploy CloudFormation** - The current deployment is working perfectly
-2. **Lambda functions have been updated directly** and fixes are persistent
-3. **All changes are applied and tested** - platform is production-ready
-4. **Demo authentication is intentional** - bypasses CORS issues for demo purposes
-
 ## 🎯 Next Steps
 
 The platform is complete and ready for:
