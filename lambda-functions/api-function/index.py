@@ -276,7 +276,8 @@ def get_rules(headers):
                 grouped_rules[category].append({
                     'code': rule.get('rule_id', ''),
                     'desc': rule.get('description', ''),
-                    'severity': rule.get('severity', 'minor')
+                    'severity': rule.get('severity', 'minor'),
+                    'logic': rule.get('logic', {})
                 })
         
         return {

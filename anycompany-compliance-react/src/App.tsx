@@ -151,6 +151,7 @@ interface Rule {
   code: string;
   desc: string;
   severity: 'major' | 'moderate' | 'minor';
+  logic?: any;
 }
 
 interface Results {
@@ -283,7 +284,8 @@ const AnyCompanyComplianceApp: React.FC = () => {
             groupedRules[category] = data.rules[category].map((rule: any) => ({
               code: rule.code,
               desc: rule.desc,
-              severity: rule.severity as 'major' | 'moderate' | 'minor'
+              severity: rule.severity as 'major' | 'moderate' | 'minor',
+              logic: rule.logic || {}
             }));
           }
         });
@@ -1417,10 +1419,15 @@ const AnyCompanyComplianceApp: React.FC = () => {
                             border: '1px solid #e9ecef',
                             borderRadius: '4px',
                             padding: '10px',
-                            fontSize: '13px',
-                            fontFamily: 'monospace'
+                            fontSize: '13px'
                           }}>
-                            Database-driven rule validation logic for {rule.code}
+                            {rule.logic && Object.keys(rule.logic).length > 0 ? (
+                              <pre style={{margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace'}}>
+                                {JSON.stringify(rule.logic, null, 2)}
+                              </pre>
+                            ) : (
+                              `Database-driven rule validation logic for ${rule.code}`
+                            )}
                           </div>
                         </div>
                         
