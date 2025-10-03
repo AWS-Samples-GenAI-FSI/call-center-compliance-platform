@@ -46,7 +46,7 @@ resource "aws_cognito_user_pool_client" "anycompany_cognito_user_pool_client" {
   name         = "anycompany-compliance-client-${var.environment}"
   user_pool_id = aws_cognito_user_pool.anycompany_cognito_user_pool.id
 
-  generate_secret = false
+  generate_secret = true
   explicit_auth_flows = [
     "ADMIN_NO_SRP_AUTH",
     "USER_PASSWORD_AUTH"
@@ -62,8 +62,8 @@ resource "aws_cognito_user_pool_client" "anycompany_cognito_user_pool_client" {
   id_token_validity      = 8
   refresh_token_validity = 30
 
-  callback_urls = ["http://${aws_lb.anycompany_alb.dns_name}/oauth2/idpresponse"]
-  logout_urls   = ["http://${aws_lb.anycompany_alb.dns_name}/"]
+  callback_urls = ["https://${aws_lb.anycompany_alb.dns_name}/oauth2/idpresponse"]
+  logout_urls   = ["https://${aws_lb.anycompany_alb.dns_name}/"]
 
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["email", "openid", "profile"]
@@ -80,12 +80,11 @@ resource "aws_cognito_user_pool_domain" "anycompany_cognito_user_pool_domain" {
 resource "aws_ecr_repository" "anycompany_ecr_repository" {
   name                 = "anycompany-ui-${var.environment}"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = false
   }
-
-
 }
 
 # ECS Cluster
@@ -150,7 +149,6 @@ resource "aws_cloudwatch_log_group" "anycompany_log_group" {
 
 # ECS Task Definition
 resource "aws_ecs_task_definition" "anycompany_task_definition" {
-  count                    = var.deploy_ecs ? 1 : 0
   family                   = "anycompany-ui-${var.environment}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
@@ -235,29 +233,17 @@ resource "aws_lb_listener" "anycompany_alb_listener" {
   protocol          = "HTTP"
 
   default_action {
-    type = "authenticate-cognito"
-    order = 1
-
-    authenticate_cognito {
-      user_pool_arn       = aws_cognito_user_pool.anycompany_cognito_user_pool.arn
-      user_pool_client_id = aws_cognito_user_pool_client.anycompany_cognito_user_pool_client.id
-      user_pool_domain    = aws_cognito_user_pool_domain.anycompany_cognito_user_pool_domain.domain
-    }
-  }
-
-  default_action {
     type             = "forward"
-    order            = 2
     target_group_arn = aws_lb_target_group.anycompany_target_group.arn
   }
 }
 
 # ECS Service
 resource "aws_ecs_service" "anycompany_ecs_service" {
-  count           = var.deploy_ecs ? 1 : 0
   name            = "anycompany-ui-${var.environment}"
   cluster         = aws_ecs_cluster.anycompany_ecs_cluster.id
-  task_definition = aws_ecs_task_definition.anycompany_task_definition[0].arn
+  task_definition = aws_ecs_task_definition.anycompany_task_definition.arn
+  
   desired_count   = 1
   launch_type     = "FARGATE"
 
@@ -273,5 +259,8 @@ resource "aws_ecs_service" "anycompany_ecs_service" {
     assign_public_ip = true
   }
 
-  depends_on = [aws_lb_listener.anycompany_alb_listener]
+  depends_on = [
+    aws_lb_listener.anycompany_alb_listener,
+    null_resource.build_and_deploy_container
+  ]
 }

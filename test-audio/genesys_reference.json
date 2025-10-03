@@ -1,0 +1,122 @@
+{
+  "calls": {
+    "GEN-2024-001001": {
+      "expected_violations": ["LO1001.04"],
+      "expected_entities": {
+        "agent_names": ["John"],
+        "company_identification": []
+      },
+      "description": "Agent fails to provide full name",
+      "audio_file": "test_001_agent_identification_1.wav"
+    },
+    "GEN-2024-001002": {
+      "expected_violations": ["LO1001.04"],
+      "expected_entities": {
+        "agent_names": ["Mike"],
+        "company_identification": []
+      },
+      "description": "Agent uses alias instead of real name",
+      "audio_file": "test_002_agent_identification_2.wav"
+    },
+    "GEN-2024-001003": {
+      "expected_violations": ["LO1001.04"],
+      "expected_entities": {
+        "agent_names": [],
+        "company_identification": []
+      },
+      "description": "Agent fails to identify themselves",
+      "audio_file": "test_003_agent_identification_3.wav"
+    },
+    "GEN-2024-002001": {
+      "expected_violations": ["LO1007.05"],
+      "expected_entities": {
+        "threatening_language": ["arrest", "jail"],
+        "agent_names": ["Steve"]
+      },
+      "description": "Agent threatens arrest for debt",
+      "audio_file": "test_022_threatening_language_1.wav"
+    },
+    "GEN-2024-002002": {
+      "expected_violations": ["LO1007.05"],
+      "expected_entities": {
+        "threatening_language": ["garnish wages"],
+        "agent_names": ["Rachel"]
+      },
+      "description": "Agent threatens wage garnishment without legal authority",
+      "audio_file": "test_023_threatening_language_2.wav"
+    },
+    "GEN-2024-002003": {
+      "expected_violations": ["LO1007.05"],
+      "expected_entities": {
+        "threatening_language": ["seize property"],
+        "agent_names": ["Kevin"]
+      },
+      "description": "Agent threatens property seizure",
+      "audio_file": "test_024_threatening_language_3.wav"
+    },
+    "GEN-2024-002004": {
+      "expected_violations": ["LO1007.05"],
+      "expected_entities": {
+        "threatening_language": ["seize property"],
+        "agent_names": ["Kevin"]
+      },
+      "description": "Agent threatens property seizure",
+      "audio_file": "test_025_threatening_language_4.wav"
+    },
+    "GEN-2024-003001": {
+      "expected_violations": ["LO1005.04"],
+      "expected_entities": {
+        "legal_terms": ["attorney", "lawyer"],
+        "agent_names": ["Karen"]
+      },
+      "description": "Agent continues contact after attorney representation mentioned",
+      "audio_file": "test_015_legal_terms_1.wav"
+    },
+    "GEN-2024-004001": {
+      "expected_violations": ["LO1001.04"],
+      "expected_entities": {
+        "agent_names": ["Mike"],
+        "company_identification": []
+      },
+      "description": "Agent uses alias instead of real name",
+      "audio_file": "test_092_compliant_calls_1.wav"
+    },
+    "GEN-2024-004002": {
+      "expected_violations": [],
+      "expected_entities": {
+        "agent_names": ["Sarah Davis"],
+        "company_identification": ["AnyCompany Financial"],
+        "customer_names": ["John Wilson"]
+      },
+      "description": "Compliant call with proper customer verification",
+      "audio_file": "test_093_compliant_calls_2.wav"
+    },
+    "GEN-2024-005001": {
+      "expected_violations": ["LO1001.04", "LO1005.04", "LO1007.05"],
+      "expected_entities": {
+        "agent_names": ["Derek"],
+        "legal_terms": ["attorney"],
+        "threatening_language": ["arrest"]
+      },
+      "description": "Multiple violations: identification, legal representation, threats",
+      "audio_file": "test_085_mixed_violations_1.wav"
+    }
+  },
+  "summary": {
+    "total_calls": 11,
+    "violation_categories": {
+      "identification_rules": 4,
+      "threatening_language": 4,
+      "legal_terms": 1,
+      "compliant_calls": 1,
+      "mixed_violations": 1
+    },
+    "entity_types": [
+      "agent_names",
+      "company_identification", 
+      "legal_terms",
+      "threatening_language",
+      "customer_names"
+    ]
+  }
+}

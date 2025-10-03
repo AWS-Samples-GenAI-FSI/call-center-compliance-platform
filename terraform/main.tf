@@ -34,7 +34,7 @@ variable "allowed_ip" {
 variable "deploy_ecs" {
   description = "Whether to deploy ECS service"
   type        = bool
-  default     = false
+  default     = true
 }
 
 # Data sources
@@ -431,28 +431,3 @@ resource "aws_vpc_endpoint" "anycompany_s3_endpoint" {
   route_table_ids   = [aws_route_table.anycompany_public_rt.id]
 }
 
-# Outputs
-output "api_endpoint" {
-  description = "API Gateway Endpoint"
-  value       = "https://${aws_api_gateway_rest_api.anycompany_rest_api.id}.execute-api.${var.aws_region}.amazonaws.com/prod"
-}
-
-output "input_bucket" {
-  description = "S3 Input Bucket"
-  value       = aws_s3_bucket.anycompany_input_bucket.id
-}
-
-output "calls_table" {
-  description = "DynamoDB Calls Table"
-  value       = aws_dynamodb_table.anycompany_calls_table.name
-}
-
-output "rules_table" {
-  description = "DynamoDB Rules Table"
-  value       = aws_dynamodb_table.anycompany_rules_table.name
-}
-
-output "application_url" {
-  description = "Application Load Balancer URL"
-  value       = "http://${aws_lb.anycompany_alb.dns_name}"
-}

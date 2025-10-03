@@ -202,12 +202,12 @@ resource "aws_lambda_permission" "s3_invoke_transcription_complete" {
   source_arn    = aws_s3_bucket.anycompany_transcribe_output_bucket.arn
 }
 
-# Archive files for Lambda functions (placeholder - you'll need actual code)
+# Archive files for Lambda functions
 data "archive_file" "api_function_zip" {
   type        = "zip"
   output_path = "api_function.zip"
   source {
-    content  = "# Placeholder - replace with actual Lambda code from CloudFormation"
+    content  = file("${path.module}/api_function_code.py")
     filename = "index.py"
   }
 }
@@ -216,7 +216,7 @@ data "archive_file" "processor_function_zip" {
   type        = "zip"
   output_path = "processor_function.zip"
   source {
-    content  = "# Placeholder - replace with actual Lambda code from CloudFormation"
+    content  = file("${path.module}/processor_function_code.py")
     filename = "index.py"
   }
 }
@@ -225,7 +225,7 @@ data "archive_file" "transcription_complete_function_zip" {
   type        = "zip"
   output_path = "transcription_complete_function.zip"
   source {
-    content  = "# Placeholder - replace with actual Lambda code from CloudFormation"
+    content  = file("${path.module}/transcription_complete_function_code.py")
     filename = "index.py"
   }
 }

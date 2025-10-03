@@ -1,37 +1,45 @@
-# Terraform Infrastructure
+# AnyCompany Compliance Platform - Terraform
 
-This directory contains the Terraform configuration for the AnyCompany Compliance Platform.
+## 🚀 Automated Deployment
 
-## Quick Start
-
+### One-Command Deployment
 ```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
-./deploy-terraform.sh
+./deploy-automated.sh
 ```
 
-## Files
+### Interactive Deployment
+```bash
+./deploy.sh
+```
 
-- `main.tf` - Core infrastructure (VPC, S3, DynamoDB)
-- `lambda.tf` - Lambda functions and IAM
-- `api_gateway.tf` - API Gateway configuration
-- `cognito_ecs.tf` - Cognito, ECS, ALB setup
-- `notifications.tf` - S3 notifications, WAF, CodeBuild
-- `aws_services.tf` - AWS service configurations
-- `deploy-terraform.sh` - Deployment script
-- `TERRAFORM.md` - Detailed documentation
+## ✅ Features
 
-## Architecture
+- **Enhanced Rules Library**: Displays detailed rule logic (type, patterns, conditions)
+- **43 Compliance Rules**: Complete rule engine with AI-powered detection
+- **Real-time Processing**: AWS Transcribe + Comprehend integration
+- **Entity Metrics**: Confidence scoring and performance analysis
 
-Creates 75+ AWS resources including:
-- VPC with public/private subnets
-- S3 buckets for audio processing
-- Lambda functions for compliance processing
-- API Gateway for REST endpoints
-- Cognito for authentication
-- ECS for containerized frontend
-- SQS for bulk processing
-- WAF for security
+## 🏗️ Infrastructure
 
-See `TERRAFORM.md` for complete documentation.
+- **Lambda Functions**: API, Processor, Transcription Complete
+- **Storage**: S3 buckets for audio, transcripts, entities
+- **Database**: DynamoDB for calls and rules
+- **Compute**: ECS Fargate with load balancer
+- **AI Services**: Transcribe, Comprehend
+
+## 📊 Enhanced UI
+
+The Terraform version now includes the same enhanced Rules Library tab as CloudFormation:
+- Rule logic details (patterns, conditions, checks)
+- Complete rule metadata
+- Proper JSON serialization with DecimalEncoder
+
+## 🔧 Manual Steps (if needed)
+
+1. **Configure AWS CLI**: `aws configure`
+2. **Deploy**: `./deploy-automated.sh`
+3. **Access**: Use the Application URL from output
+
+## 🎯 Next Deployment
+
+Everything is now automated - just run `./deploy-automated.sh` for complete deployment.
