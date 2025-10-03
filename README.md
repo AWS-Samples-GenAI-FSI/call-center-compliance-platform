@@ -1,5 +1,7 @@
 # AnyCompany Financial Services Compliance Platform
 
+**Authors:** Shashi Makkapati, Jacob Scheatzle
+
 ![Demo](demo.gif)
 
 ## 🎯 Platform Status: Production-Ready AI-Powered Compliance System
