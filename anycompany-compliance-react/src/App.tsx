@@ -1202,6 +1202,7 @@ const AnyCompanyComplianceApp: React.FC = () => {
                         <th style={{border: '1px solid #ddd', padding: '8px', textAlign: 'left'}}>Preset Comment</th>
                         <th style={{border: '1px solid #ddd', padding: '8px', textAlign: 'left'}}>Genesys Call ID</th>
                         <th style={{border: '1px solid #ddd', padding: '8px', textAlign: 'left'}}>Audio File</th>
+                        <th style={{border: '1px solid #ddd', padding: '8px', textAlign: 'left'}}>Transcript</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1248,7 +1249,8 @@ const AnyCompanyComplianceApp: React.FC = () => {
                                   comment: comment,
                                   callId: callId,
                                   filename: call.filename,
-                                  audio_url: call.audio_url
+                                  audio_url: call.audio_url,
+                                  transcript_url: call.transcript_url
                                 });
                               });
                             }
@@ -1266,6 +1268,13 @@ const AnyCompanyComplianceApp: React.FC = () => {
                                 <a href={row.audio_url} target="_blank" rel="noopener noreferrer" style={{color: '#007bff', textDecoration: 'underline'}}>🎵 {row.filename}</a>
                               ) : (
                                 <span style={{color: '#666'}}>🎵 {row.filename}</span>
+                              )}
+                            </td>
+                            <td style={{border: '1px solid #ddd', padding: '8px'}}>
+                              {row.transcript_url ? (
+                                <a href={row.transcript_url} target="_blank" rel="noopener noreferrer" style={{color: '#28a745', textDecoration: 'underline'}}>📄 Transcript</a>
+                              ) : (
+                                <span style={{color: '#666'}}>📄 Processing...</span>
                               )}
                             </td>
                           </tr>

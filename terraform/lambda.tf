@@ -126,6 +126,7 @@ resource "aws_lambda_function" "anycompany_api_function" {
       CALLS_TABLE_NAME = aws_dynamodb_table.anycompany_calls_table.name
       INPUT_BUCKET_NAME = aws_s3_bucket.anycompany_input_bucket.id
       RULES_TABLE_NAME = aws_dynamodb_table.anycompany_rules_table.name
+      TRANSCRIBE_OUTPUT_BUCKET_NAME = aws_s3_bucket.anycompany_transcribe_output_bucket.id
     }
   }
 

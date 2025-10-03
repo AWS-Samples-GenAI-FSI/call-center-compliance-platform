@@ -58,6 +58,21 @@ def get_results(headers):
                 )
             except:
                 call['audio_url'] = None
+            
+            # Add transcript URL
+            try:
+                # Generate transcript filename from audio filename
+                transcript_filename = call['filename'].replace('.wav', '.json')
+                call['transcript_url'] = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
+                        'Key': f"transcripts/{transcript_filename}"
+                    },
+                    ExpiresIn=3600
+                )
+            except:
+                call['transcript_url'] = None
         
         # Calculate AI quality metrics for this call
         violations = call.get('violations', [])
