@@ -210,6 +210,75 @@ Web Dashboard ← API Gateway ← Lambda API ← AWS Comprehend
 - **AWS Cognito**: User pool and identity management
 - **CORS Configuration**: Proper cross-origin resource sharing
 
+## 🏗️ Terraform Infrastructure Architecture
+
+### **Core Architecture Files**
+
+#### **main.tf** - Foundation Infrastructure
+- **Provider Configuration**: AWS provider with version constraints
+- **VPC Setup**: Custom VPC with public/private subnets across 2 AZs
+- **S3 Buckets**: 4 buckets (input, transcribe-output, comprehend-output, source)
+- **DynamoDB Tables**: Calls and rules tables with encryption
+- **Security Groups**: ALB, container, and VPC endpoint security
+- **VPC Endpoints**: ECR and S3 endpoints for private networking
+
+#### **lambda.tf** - Serverless Functions
+- **3 Lambda Functions**: API, processor, transcription-complete
+- **IAM Roles**: Comprehensive permissions for Transcribe, Comprehend, S3, DynamoDB
+- **Event Triggers**: S3 notifications and SQS event source mappings
+- **Code Packaging**: Automatic ZIP creation from Python files
+
+#### **api_gateway.tf** - REST API
+- **API Gateway**: Proxy integration with Lambda
+- **CORS Configuration**: Full OPTIONS method support
+- **Deployment**: Automatic staging to 'prod'
+
+#### **cognito_ecs.tf** - Authentication & UI
+- **Cognito User Pool**: Authentication with password policies
+- **ECS Cluster**: Fargate-based container orchestration
+- **Application Load Balancer**: Public-facing with health checks
+- **ECR Repository**: Container image storage
+
+### **Automated Deployment System**
+
+#### **lambda_deployment.tf** - Orchestration
+- **CodeBuild Integration**: Automated container builds (no local Docker)
+- **Rules Population**: Automatic DynamoDB seeding with 43 compliance rules
+- **Container Deployment**: React app build and ECR push
+
+#### **deploy-automated.sh** - One-Command Deployment
+```bash
+./deploy-automated.sh  # Deploys everything automatically
+```
+
+### **Key Terraform Features**
+
+#### **Infrastructure as Code**
+- **Modular Design**: Separate files for different components
+- **Variable Configuration**: Environment-specific settings
+- **State Management**: Tracks resource dependencies
+- **Dependency Resolution**: Proper resource ordering
+
+#### **Production-Ready Features**
+- **Security**: VPC endpoints, security groups, encryption
+- **Scalability**: Auto-scaling ECS, load balancer
+- **Monitoring**: CloudWatch logs, health checks
+- **High Availability**: Multi-AZ deployment
+
+#### **AI Services Integration**
+- **AWS Transcribe**: Audio-to-text conversion
+- **AWS Comprehend**: Entity extraction and sentiment analysis
+- **Lambda Processing**: Real-time compliance analysis
+- **DynamoDB Storage**: Structured data with proper indexing
+
+### **Deployment Flow**
+1. **terraform init** - Downloads providers
+2. **Lambda Packaging** - Creates ZIP files from Python code
+3. **Infrastructure Creation** - VPC, S3, DynamoDB, Lambda, API Gateway
+4. **CodeBuild Execution** - Builds React container automatically
+5. **ECS Deployment** - Runs containerized UI with load balancer
+6. **Rules Population** - Seeds DynamoDB with 43 compliance rules
+
 ## 🚀 Deployment Options
 
 ### **Terraform Deployment** (Recommended)
