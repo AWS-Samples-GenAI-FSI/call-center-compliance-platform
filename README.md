@@ -1,5 +1,7 @@
 # AnyCompany Financial Services Compliance Platform
 
+![Demo](demo.gif)
+
 ## 🎯 Platform Status: Production-Ready AI-Powered Compliance System
 
 Complete, working compliance validation platform with automated call center monitoring using AWS AI services.
