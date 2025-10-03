@@ -28,7 +28,9 @@ Complete, working compliance validation platform with automated call center moni
 - ⚠️ **Threatening Language**: Harassment and false threats
 - 🛡️ **PII Protection**: Social security, account numbers exposure
 
-## 🏗️ System Architecture
+## 🏗️ Solution Architecture
+
+![Solution Architecture](solution-architecture.png)
 
 ### **Complete AI-Powered Workflow**
 ```
