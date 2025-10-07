@@ -98,9 +98,10 @@ EventBridge (2 AM) → Step Functions → Batch Prep → Map State (100 parallel
 
 #### **Audio-to-Text Processing**
 - **Input**: WAV audio files from S3 input bucket
-- **Output**: JSON transcript files in S3 transcribe output bucket
+- **Output**: JSON transcript files organized by Genesys ID in S3 transcribe output bucket
 - **Language**: English (en-US)
 - **Job Naming**: `anycompany-{call_id}-{timestamp}`
+- **File Organization**: `transcripts/genesys-id/{genesys_id}.json` and `.txt`
 - **Quality**: High-accuracy transcription for compliance analysis
 
 #### **Transcription Workflow**
@@ -119,13 +120,19 @@ EventBridge (2 AM) → Step Functions → Batch Prep → Map State (100 parallel
   - `detect_pii_entities()` - SSN, phone numbers, account numbers
   - `detect_sentiment()` - Threatening language detection
 
-#### **Compliance-Specific Entities**
+#### **Enhanced Entity Extraction (12 Categories)**
 - **Persons**: Agent names, customer names (99%+ confidence)
-- **Financial**: Account references, payment terms, balances
+- **Financial**: Account references, payment terms, balances, amounts
 - **Legal**: Attorney, bankruptcy, legal action, garnishment
 - **Medical**: Hospital, doctor, surgery, illness terms
 - **Communication**: Text message, SMS, email, voicemail
 - **PII**: Social security numbers, credit card numbers, phone numbers
+- **Threatening Language**: Arrest, jail, police, legal threats
+- **Profanity**: Inappropriate language detection
+- **Company Identification**: Business names, servicing companies
+- **Mini-Miranda**: Debt collection disclosures
+- **Customer Name Accuracy**: Validation against reference data
+- **State References**: Geographic location mentions
 
 #### **Entity Storage**
 - **S3 Output**: `entities/{timestamp}_entities.json`
@@ -138,12 +145,15 @@ EventBridge (2 AM) → Step Functions → Batch Prep → Map State (100 parallel
 - **Primary Key**: `call_id` (UUID)
 - **Key Attributes**:
   - `filename` - Original audio file name
+  - `genesys_call_id` - Extracted Genesys ID (VM-2024-001001, GEN-2024-001001)
   - `transcript` - Full transcript text from AWS Transcribe
   - `entities` - Extracted entities from AWS Comprehend (with Decimal confidence scores)
   - `violations` - Array of detected compliance violations
   - `violation_count` - Number of violations for quick filtering
   - `processing_status` - Current processing state (transcribing, completed, failed)
   - `ai_quality` - AI confidence metrics and manual review flags
+  - `batch_processing` - Boolean flag for Step Functions batch processing
+  - `upload_type` - Processing source (ui_upload, batch_stepfunctions)
   - `created_at`, `processed_at` - Timestamps
 
 #### **Rules Table** (`anycompany-rules-prod`)
@@ -213,22 +223,29 @@ EventBridge (2 AM) → Step Functions → Batch Prep → Map State (100 parallel
 
 #### **Genesys Call ID Architecture**
 - **Purpose**: Universal identifier for call tracking across systems
-- **Format**: `GEN-2024-001001` (Year-Category-Sequence)
+- **Format**: `VM-2024-001001` (Type-Year-Sequence) for voicemails, `GEN-2024-001001` for general calls
+- **Enhanced Organization**: Systematic file naming with Genesys ID extraction
 - **Mapping**: Test filenames → Genesys Call IDs → Expected violations
-- **Storage**: `reference/master_reference.json` in S3 input bucket
+- **Storage**: `voicemail_reference.json` and `master_reference.json` in S3 input bucket
 
 #### **Reference Data Structure**
 ```json
 {
-  "calls": {
-    "GEN-2024-001001": {
-      "expected_violations": ["LO1001.04"],
+  "voicemails": {
+    "VM-2024-001001": {
+      "agent_name": "Sarah Johnson",
+      "customer_name": "Robert Williams Jr.",
+      "customer_state": "MA",
+      "expected_violations": ["LO1001.08"],
       "expected_entities": {
-        "agent_names": ["John"],
-        "threatening_language": ["arrest", "jail"]
+        "agent_names": ["Sarah Johnson"],
+        "customer_names": ["Robert Williams Jr."],
+        "customer_name_accuracy": true,
+        "profanity": ["hell"],
+        "financial_amounts": ["$2,847.32"]
       },
-      "description": "Agent identification violation",
-      "audio_file": "test_001_agent_identification_1.wav"
+      "description": "Agent failed to use customer's full name including suffix",
+      "audio_file": "voicemail_001_VM_2024_001001.wav"
     }
   }
 }
@@ -373,7 +390,8 @@ aws cloudformation deploy --template-file infrastructure.yaml --stack-name anyco
 
 ## 🧪 Testing
 
-### **Test Audio Files** (100 files)
+### **Test Audio Files** (110+ files)
+- **Voicemail Test Suite**: 10 comprehensive voicemail scenarios (VM-2024-001001 to VM-2024-002003)
 - **Agent Identification**: 7 test scenarios
 - **Threatening Language**: 7 test scenarios  
 - **Legal Terms**: 7 test scenarios
