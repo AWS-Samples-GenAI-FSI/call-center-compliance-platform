@@ -36,16 +36,28 @@ Complete, working compliance validation platform with automated call center moni
 
 ### **Complete AI-Powered Workflow**
 ```
+📱 Individual Upload:
 Audio Upload → S3 Input → Lambda Processor → AWS Transcribe → Transcript
                                                      ↓
 DynamoDB ← Lambda Completion Handler ← S3 Transcribe Output
     ↓                                         ↓
 Web Dashboard ← API Gateway ← Lambda API ← AWS Comprehend
+
+🏭 Batch Processing (10K Daily):
+EventBridge (2 AM) → Step Functions → Batch Prep → Map State (100 parallel)
+                                         ↓
+                    Batch Trigger → S3 Copy → Existing Processing Flow
 ```
 
 ## 🔧 Core Components
 
-### **1. AWS Lambda Functions (3 Total)**
+### **1. AWS Lambda Functions (5 Total)**
+
+#### **🚀 Step Functions Batch Processing** (NEW)
+- **Batch Prep Function** (`anycompany-batch-prep-prod`): Scans S3 folders, prepares 10K file manifests
+- **Batch Trigger Function** (`anycompany-batch-trigger-prod`): Connects Step Functions to existing processing flow
+- **Production Capacity**: 100 parallel files, 10K daily processing
+- **Error Handling**: 5% failure tolerance, automatic retries
 
 #### **🎯 Processor Function** (`anycompany-processor-prod`)
 - **Purpose**: Initial audio file processing and transcription job creation
@@ -149,7 +161,29 @@ Web Dashboard ← API Gateway ← Lambda API ← AWS Comprehend
     - `entity_types` - Required Comprehend entity types
     - `timeFrame` - Timing requirements (e.g., first_60_seconds)
 
-### **5. Compliance Rules Engine (43 Rules)**
+### **5. AWS Step Functions Batch Processing** (NEW)
+
+#### **Production State Machine** (`anycompany-batch-processor-prod`)
+- **Daily Automation**: EventBridge trigger at 2:00 AM UTC
+- **Batch Capacity**: Up to 15,000 files per execution
+- **Parallel Processing**: 100 files simultaneously
+- **Error Resilience**: 5% failure tolerance with automatic retries
+- **Processing Time**: 10K files in ~100 minutes (vs 10+ hours sequential)
+
+#### **Batch Processing Workflow**
+1. **PrepareBatch**: Scan S3 folder, generate file manifest
+2. **CheckBatchSize**: Validate batch size (max 15K files)
+3. **ProcessBatch**: Map state with 100 parallel executions
+4. **TriggerProcessing**: Connect to existing Lambda processing flow
+5. **GenerateSummary**: Aggregate results and completion status
+
+#### **Daily Automation**
+- **EventBridge Rule**: `cron(0 2 * * ? *)` - Daily at 2 AM UTC
+- **Input Folder**: `s3://bucket/daily-batch/`
+- **Automatic Processing**: No manual intervention required
+- **Monitoring**: Real-time execution tracking via Step Functions console
+
+### **6. Compliance Rules Engine (43 Rules)**
 
 #### **Rule Categories**
 - **Identification (9 rules)**: Agent name disclosure, state-specific requirements
@@ -175,7 +209,7 @@ Web Dashboard ← API Gateway ← Lambda API ← AWS Comprehend
    - Calculate confidence scores
 5. Create violation records with evidence
 
-### **6. Reference Data System**
+### **7. Reference Data System**
 
 #### **Genesys Call ID Architecture**
 - **Purpose**: Universal identifier for call tracking across systems
@@ -200,7 +234,7 @@ Web Dashboard ← API Gateway ← Lambda API ← AWS Comprehend
 }
 ```
 
-### **7. Web Dashboard (React TypeScript)**
+### **8. Web Dashboard (React TypeScript)**
 
 #### **Frontend Features**
 - **Call Results**: List of processed calls with violation counts
@@ -227,10 +261,21 @@ Web Dashboard ← API Gateway ← Lambda API ← AWS Comprehend
 - **VPC Endpoints**: ECR and S3 endpoints for private networking
 
 #### **lambda.tf** - Serverless Functions
-- **3 Lambda Functions**: API, processor, transcription-complete
+- **5 Lambda Functions**: API, processor, transcription-complete, batch-prep, batch-trigger
 - **IAM Roles**: Comprehensive permissions for Transcribe, Comprehend, S3, DynamoDB
 - **Event Triggers**: S3 notifications and SQS event source mappings
 - **Code Packaging**: Automatic ZIP creation from Python files
+
+#### **step_functions.tf** - Batch Processing (NEW)
+- **Step Functions State Machine**: Production batch processor with 100 parallel execution
+- **EventBridge Integration**: Daily automation at 2 AM UTC
+- **IAM Roles**: Step Functions execution and EventBridge trigger permissions
+- **Error Handling**: Retry logic, failure tolerance, and error isolation
+
+#### **batch_deployment.tf** - Batch Lambda Deployment (NEW)
+- **Automated Packaging**: ZIP creation for batch processing Lambda functions
+- **Code Updates**: Automatic deployment of batch prep and trigger functions
+- **Dependency Management**: Proper resource ordering and updates
 
 #### **api_gateway.tf** - REST API
 - **API Gateway**: Proxy integration with Lambda
@@ -306,11 +351,19 @@ aws cloudformation deploy --template-file infrastructure.yaml --stack-name anyco
 
 ## 📊 System Performance
 
-### **Processing Metrics**
+### **Individual Processing Metrics**
 - **Audio Processing**: ~30-60 seconds per file (AWS Transcribe)
 - **Entity Extraction**: ~5-10 seconds per transcript (AWS Comprehend)
 - **Compliance Analysis**: ~1-2 seconds per call (43 rules evaluation)
 - **Violation Detection**: Real-time with confidence scoring
+
+### **Batch Processing Metrics** (NEW)
+- **Daily Capacity**: 10,000 calls processed automatically
+- **Parallel Processing**: 100 files simultaneously
+- **Processing Time**: ~100 minutes for 10K files (vs 10+ hours sequential)
+- **Automation**: Daily 2 AM trigger, zero manual intervention
+- **Error Resilience**: 5% failure tolerance, automatic retries
+- **Scalability**: Up to 15,000 files per batch execution
 
 ### **AI Quality Metrics**
 - **Entity Confidence**: 99%+ for persons, financial terms, legal language
@@ -385,6 +438,8 @@ aws cloudformation deploy --template-file infrastructure.yaml --stack-name anyco
 - ✅ 43 regulatory rules with automatic violation detection  
 - ✅ AWS Transcribe + Comprehend integration
 - ✅ Real-time processing with confidence scoring
+- ✅ **Step Functions batch processing (10K daily calls, 100 parallel)**
+- ✅ **EventBridge daily automation (2 AM UTC scheduling)**
 - ✅ Web dashboard with entity analytics
 - ✅ Both CloudFormation and Terraform deployment options
 - ✅ Comprehensive test suite and reference data
