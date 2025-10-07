@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'AnyCompany Compliance Platform - Complete Single Deployment'
+Description: 'AnyCompany Compliance Platform - Complete Single Deployment with Step Functions Batch Processing'
 
 Parameters:
   Environment:
@@ -646,6 +646,7 @@ Resources:
           CALLS_TABLE_NAME: !Ref AnyCompanyCallsTable
           INPUT_BUCKET_NAME: !Ref AnyCompanyInputBucket
           RULES_TABLE_NAME: !Ref AnyCompanyRulesTable
+          TRANSCRIBE_OUTPUT_BUCKET_NAME: !Ref AnyCompanyTranscribeOutputBucket
       Code:
         ZipFile: |
           import json
@@ -707,6 +708,23 @@ Resources:
                           )
                       except:
                           call['audio_url'] = None
+                      
+                      # Add transcript URL for plain text file
+                      try:
+                          call_id = call.get('call_id', '')
+                          if call_id:
+                              call['transcript_url'] = s3_client.generate_presigned_url(
+                                  'get_object',
+                                  Params={
+                                      'Bucket': os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
+                                      'Key': f"transcripts/plain/{call_id}.txt"
+                                  },
+                                  ExpiresIn=3600
+                              )
+                          else:
+                              call['transcript_url'] = None
+                      except:
+                          call['transcript_url'] = None
               
               total_violations = sum(len(call.get('violations', [])) for call in calls)
               compliance_rate = ((len(calls) * 3 - total_violations) / (len(calls) * 3)) * 100 if calls else 100
@@ -2207,6 +2225,353 @@ Resources:
       ServiceToken: !GetAtt AnyCompanyRulesSeederFunction.Arn
     DependsOn: AnyCompanyRulesTable
 
+  # Step Functions Batch Processing Components
+  AnyCompanyBatchPrepFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-batch-prep-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import re
+          from datetime import datetime
+          
+          def lambda_handler(event, context):
+              s3 = boto3.client('s3')
+              
+              batch_folder = event.get('batch_folder', 's3://bucket/daily-batch/')
+              max_files = event.get('max_files', 10000)
+              
+              # Parse S3 path
+              bucket_match = re.match(r's3://([^/]+)/(.+)', batch_folder)
+              if not bucket_match:
+                  raise ValueError(f'Invalid S3 path: {batch_folder}')
+              
+              bucket_name = bucket_match.group(1)
+              prefix = bucket_match.group(2)
+              
+              print(f'🔍 Processing batch folder: {batch_folder}')
+              print(f'📊 Max files limit: {max_files}')
+              print(f'📁 Bucket: {bucket_name}, Prefix: {prefix}')
+              
+              try:
+                  # List WAV files in the batch folder
+                  response = s3.list_objects_v2(
+                      Bucket=bucket_name,
+                      Prefix=prefix,
+                      MaxKeys=max_files + 100  # Buffer for filtering
+                  )
+                  
+                  calls = []
+                  if 'Contents' in response:
+                      for obj in response['Contents']:
+                          key = obj['Key']
+                          filename = key.split('/')[-1]
+                          
+                          # Only process WAV files
+                          if filename.lower().endswith('.wav'):
+                              # Extract Genesys ID from filename
+                              genesys_id = extract_genesys_id(filename)
+                              
+                              calls.append({
+                                  'filename': filename,
+                                  'key': key,
+                                  'genesys_id': genesys_id,
+                                  'size': obj['Size']
+                              })
+                              
+                              # Stop if we hit the max files limit
+                              if len(calls) >= max_files:
+                                  break
+                  
+                  batch_info = {
+                      'batch_folder': batch_folder,
+                      'total_files_found': len(calls),
+                      'processing_timestamp': datetime.utcnow().isoformat(),
+                      'max_files_limit': max_files
+                  }
+                  
+                  print(f'✅ Batch preparation complete: {len(calls)} files ready for processing')
+                  
+                  return {
+                      'statusCode': 200,
+                      'batch_info': batch_info,
+                      'calls': calls
+                  }
+                  
+              except Exception as e:
+                  print(f'❌ Error in batch preparation: {str(e)}')
+                  raise e
+          
+          def extract_genesys_id(filename):
+              # Extract Genesys ID from various filename formats
+              # VM-2024-001001, GEN-2024-001001, etc.
+              patterns = [
+                  r'(VM-\d{4}-\d{6})',
+                  r'(GEN-\d{4}-\d{6})',
+                  r'(\w{2,3}-\d{4}-\d{6})'
+              ]
+              
+              for pattern in patterns:
+                  match = re.search(pattern, filename)
+                  if match:
+                      return match.group(1)
+              
+              # Fallback: generate from filename
+              base_name = filename.replace('.wav', '')
+              return f'GEN-2024-{hash(base_name) % 999999:06d}'
+
+  AnyCompanyBatchTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'anycompany-batch-trigger-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt AnyCompanyLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          CALLS_TABLE: !Ref AnyCompanyCallsTable
+          ENVIRONMENT: !Ref Environment
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import uuid
+          import os
+          from datetime import datetime
+          
+          def lambda_handler(event, context):
+              s3 = boto3.client('s3')
+              dynamodb = boto3.resource('dynamodb')
+              calls_table = dynamodb.Table(os.environ['CALLS_TABLE'])
+              
+              filename = event.get('filename')
+              key = event.get('key')
+              genesys_id = event.get('genesys_id')
+              
+              print(f'🔄 Processing batch call: {filename} → {genesys_id}')
+              
+              # Generate unique call ID
+              call_id = str(uuid.uuid4())
+              print(f'📝 Generated call_id: {call_id}')
+              
+              try:
+                  # Create DynamoDB record for batch processing
+                  calls_table.put_item(Item={
+                      'call_id': call_id,
+                      'filename': filename,
+                      'genesys_call_id': genesys_id,
+                      'transcript': 'PROCESSING',
+                      'violations': [],
+                      'processing_status': 'transcribing',
+                      'batch_processing': True,
+                      'upload_type': 'batch_stepfunctions',
+                      'created_at': datetime.utcnow().isoformat()
+                  })
+                  print('✅ Created DynamoDB record for batch call')
+                  
+                  # Parse S3 path to get bucket and source key
+                  bucket_name = key.split('/')[0] if '/' in key else os.environ.get('INPUT_BUCKET_NAME')
+                  
+                  # Copy file from batch folder to audio/ folder to trigger existing processing
+                  source_bucket = bucket_name
+                  dest_key = f'audio/{filename}'
+                  
+                  s3.copy_object(
+                      CopySource={'Bucket': source_bucket, 'Key': key},
+                      Bucket=source_bucket,
+                      Key=dest_key
+                  )
+                  print(f'📁 Copied {key} → {dest_key}')
+                  print('🚀 Triggered existing processing flow via S3 upload')
+                  
+                  return {
+                      'statusCode': 200,
+                      'call_id': call_id,
+                      'filename': filename,
+                      'genesys_id': genesys_id,
+                      'status': 'triggered'
+                  }
+                  
+              except Exception as e:
+                  print(f'❌ Error processing batch call {filename}: {str(e)}')
+                  raise e
+
+  # Step Functions State Machine
+  AnyCompanyStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionsLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt AnyCompanyBatchPrepFunction.Arn
+                  - !GetAtt AnyCompanyBatchTriggerFunction.Arn
+
+  AnyCompanyBatchProcessorStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub 'anycompany-batch-processor-${Environment}'
+      RoleArn: !GetAtt AnyCompanyStepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Production Batch Compliance Processing - 10K Files, 100 Parallel",
+          "StartAt": "PrepareBatch",
+          "States": {
+            "PrepareBatch": {
+              "Type": "Task",
+              "Resource": "${AnyCompanyBatchPrepFunction.Arn}",
+              "ResultPath": "$.batch_result",
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 30,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Next": "CheckBatchSize"
+            },
+            "CheckBatchSize": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.batch_result.batch_info.total_files_found",
+                  "NumericEquals": 0,
+                  "Next": "NoBatchFiles"
+                },
+                {
+                  "Variable": "$.batch_result.batch_info.total_files_found",
+                  "NumericGreaterThan": 15000,
+                  "Next": "BatchTooLarge"
+                }
+              ],
+              "Default": "ProcessBatch"
+            },
+            "NoBatchFiles": {
+              "Type": "Pass",
+              "Result": {
+                "status": "completed",
+                "message": "No files found in batch folder",
+                "files_processed": 0,
+                "processing_time_seconds": 0
+              },
+              "End": true
+            },
+            "BatchTooLarge": {
+              "Type": "Pass",
+              "Result": {
+                "status": "error",
+                "message": "Batch size exceeds 15,000 files limit",
+                "max_allowed": 15000
+              },
+              "End": true
+            },
+            "ProcessBatch": {
+              "Type": "Map",
+              "ItemsPath": "$.batch_result.calls",
+              "MaxConcurrency": 100,
+              "ToleratedFailurePercentage": 5,
+              "Iterator": {
+                "StartAt": "TriggerProcessing",
+                "States": {
+                  "TriggerProcessing": {
+                    "Type": "Task",
+                    "Resource": "${AnyCompanyBatchTriggerFunction.Arn}",
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["States.TaskFailed"],
+                        "IntervalSeconds": 30,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2.0
+                      }
+                    ],
+                    "End": true
+                  }
+                }
+              },
+              "ResultPath": "$.processing_results",
+              "Next": "GenerateSummary"
+            },
+            "GenerateSummary": {
+              "Type": "Pass",
+              "Parameters": {
+                "status": "completed",
+                "total_files.$": "$.batch_result.batch_info.total_files_found",
+                "files_triggered.$": "States.ArrayLength($.processing_results)",
+                "batch_folder.$": "$.batch_result.batch_info.batch_folder",
+                "processing_timestamp.$": "$.batch_result.batch_info.processing_timestamp",
+                "max_concurrency": 100,
+                "tolerated_failure_percentage": 5,
+                "note": "Production batch processing completed - check DynamoDB for individual call status"
+              },
+              "End": true
+            }
+          }
+        }
+
+  # EventBridge Daily Automation
+  AnyCompanyEventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EventBridgeStepFunctionsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref AnyCompanyBatchProcessorStateMachine
+
+  AnyCompanyDailyBatchRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub 'anycompany-daily-batch-${Environment}'
+      Description: 'Daily compliance batch processing at 2 AM UTC'
+      ScheduleExpression: 'cron(0 2 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Arn: !Ref AnyCompanyBatchProcessorStateMachine
+          Id: 'StepFunctionsTarget'
+          RoleArn: !GetAtt AnyCompanyEventBridgeRole.Arn
+          Input: !Sub |
+            {
+              "batch_folder": "s3://${AnyCompanyInputBucket}/daily-batch/",
+              "max_files": 10000
+            }
+
   # Transcription Completion Processor
   AnyCompanyTranscriptionCompleteFunction:
     Type: AWS::Lambda::Function
@@ -2283,6 +2648,15 @@ Resources:
                               print(f'🔧 Processing rules for call {call_id} with transcript length: {len(transcript_text)}')
                               violations = process_with_rule_engine(transcript_text, call_id, filename)
                               print(f'⚠️ Found {len(violations)} violations for call {call_id}')
+                              
+                              # Save plain text transcript to S3
+                              plain_text_key = f"transcripts/plain/{call_id}.txt"
+                              s3.put_object(
+                                  Bucket=os.environ['TRANSCRIBE_OUTPUT_BUCKET'],
+                                  Key=plain_text_key,
+                                  Body=transcript_text,
+                                  ContentType='text/plain'
+                              )
                               
                               # Update call record
                               calls_table.update_item(
@@ -3086,4 +3460,34 @@ Outputs:
     Value: !Ref AnyCompanyComprehendOutputBucket
     Export:
       Name: !Sub '${AWS::StackName}-ComprehendOutputBucket'
+
+  StepFunctionsArn:
+    Description: 'Step Functions State Machine ARN for batch processing'
+    Value: !Ref AnyCompanyBatchProcessorStateMachine
+    Export:
+      Name: !Sub '${AWS::StackName}-StepFunctionsArn'
+
+  BatchPrepLambdaArn:
+    Description: 'Batch Preparation Lambda Function ARN'
+    Value: !GetAtt AnyCompanyBatchPrepFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BatchPrepLambdaArn'
+
+  BatchTriggerLambdaArn:
+    Description: 'Batch Trigger Lambda Function ARN'
+    Value: !GetAtt AnyCompanyBatchTriggerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BatchTriggerLambdaArn'
+
+  DailyBatchRuleArn:
+    Description: 'EventBridge Daily Batch Processing Rule ARN'
+    Value: !GetAtt AnyCompanyDailyBatchRule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DailyBatchRuleArn'
+
+  BatchProcessingInfo:
+    Description: 'Batch Processing System Information'
+    Value: !Sub 'Step Functions: ${AnyCompanyBatchProcessorStateMachine} | Daily Schedule: 2:00 AM UTC | Max Concurrency: 100 files | Max Batch: 15,000 files | Failure Tolerance: 5% | Daily Folder: s3://${AnyCompanyInputBucket}/daily-batch/'
+    Export:
+      Name: !Sub '${AWS::StackName}-BatchProcessingInfo'
 
