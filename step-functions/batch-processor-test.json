@@ -1,0 +1,68 @@
+{
+  "Comment": "Batch Compliance Processing - Test Version",
+  "StartAt": "PrepareBatch",
+  "States": {
+    "PrepareBatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:164543933824:function:anycompany-batch-prep-test",
+      "ResultPath": "$.batch_result",
+      "Next": "CheckBatchSize"
+    },
+    "CheckBatchSize": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.batch_result.batch_info.total_files_found",
+          "NumericEquals": 0,
+          "Next": "NoBatchFiles"
+        }
+      ],
+      "Default": "ProcessBatch"
+    },
+    "NoBatchFiles": {
+      "Type": "Pass",
+      "Result": {
+        "status": "completed",
+        "message": "No files found in batch folder",
+        "files_processed": 0
+      },
+      "End": true
+    },
+    "ProcessBatch": {
+      "Type": "Map",
+      "ItemsPath": "$.batch_result.calls",
+      "MaxConcurrency": 3,
+      "Iterator": {
+        "StartAt": "LogCallInfo",
+        "States": {
+          "LogCallInfo": {
+            "Type": "Pass",
+            "Parameters": {
+              "message": "Processing call",
+              "filename.$": "$.filename",
+              "genesys_id.$": "$.genesys_id",
+              "status": "simulated_processing"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.processing_results",
+      "Next": "GenerateSummary"
+    },
+    "GenerateSummary": {
+      "Type": "Pass",
+      "Parameters": {
+        "batch_summary": {
+          "status": "completed",
+          "total_files.$": "$.batch_result.batch_info.total_files_found",
+          "files_processed.$": "States.ArrayLength($.processing_results)",
+          "batch_folder.$": "$.batch_result.batch_info.batch_folder",
+          "processing_timestamp.$": "$.batch_result.batch_info.processing_timestamp"
+        }
+      },
+      "OutputPath": "$.batch_summary",
+      "End": true
+    }
+  }
+}

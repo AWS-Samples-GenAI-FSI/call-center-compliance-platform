@@ -64,3 +64,36 @@ output "ecr_repository_url" {
   description = "ECR repository URL"
   value       = aws_ecr_repository.anycompany_ecr_repository.repository_url
 }
+
+# Step Functions Batch Processing Outputs
+output "step_functions_arn" {
+  description = "Step Functions State Machine ARN for batch processing"
+  value       = aws_sfn_state_machine.batch_processor.arn
+}
+
+output "batch_prep_lambda_arn" {
+  description = "Batch Preparation Lambda Function ARN"
+  value       = aws_lambda_function.batch_prep.arn
+}
+
+output "batch_trigger_lambda_arn" {
+  description = "Batch Trigger Lambda Function ARN"
+  value       = aws_lambda_function.batch_trigger.arn
+}
+
+output "daily_batch_rule_arn" {
+  description = "EventBridge Daily Batch Processing Rule ARN"
+  value       = aws_cloudwatch_event_rule.daily_batch.arn
+}
+
+output "batch_processing_info" {
+  description = "Batch Processing System Information"
+  value = {
+    step_functions_name = aws_sfn_state_machine.batch_processor.name
+    daily_schedule     = "2:00 AM UTC (cron: 0 2 * * ? *)"
+    max_concurrency    = "100 files parallel"
+    max_batch_size     = "15,000 files"
+    failure_tolerance  = "5%"
+    daily_folder       = "s3://${aws_s3_bucket.anycompany_input_bucket.bucket}/daily-batch/"
+  }
+}

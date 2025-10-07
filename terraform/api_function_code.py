@@ -61,16 +61,29 @@ def get_results(headers):
             
             # Add transcript URL
             try:
-                # Generate transcript filename from audio filename
-                transcript_filename = call['filename'].replace('.wav', '.json')
-                call['transcript_url'] = s3_client.generate_presigned_url(
-                    'get_object',
-                    Params={
-                        'Bucket': os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
-                        'Key': f"transcripts/{transcript_filename}"
-                    },
-                    ExpiresIn=3600
-                )
+                # AWS Transcribe creates files with pattern: anycompany-{call_id}-{timestamp}.json
+                call_id = call.get('call_id', '')
+                if call_id:
+                    # List files in transcripts folder to find the matching one
+                    s3_response = s3_client.list_objects_v2(
+                        Bucket=os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
+                        Prefix=f"transcripts/anycompany-{call_id}-"
+                    )
+                    if 'Contents' in s3_response and s3_response['Contents']:
+                        # Use the first matching transcript file
+                        transcript_key = s3_response['Contents'][0]['Key']
+                        call['transcript_url'] = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={
+                                'Bucket': os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
+                                'Key': transcript_key
+                            },
+                            ExpiresIn=3600
+                        )
+                    else:
+                        call['transcript_url'] = None
+                else:
+                    call['transcript_url'] = None
             except:
                 call['transcript_url'] = None
         

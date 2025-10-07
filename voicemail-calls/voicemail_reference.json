@@ -1,0 +1,433 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "created": "2024-10-03",
+    "description": "Voicemail reference data for compliance rule validation",
+    "total_voicemails": 10,
+    "duration_range": "60-90 seconds",
+    "audio_format": "WAV, 16kHz, Mono"
+  },
+  "voicemails": {
+    "VM-2024-001001": {
+      "agent_name": "Sarah Johnson",
+      "customer_name": "Robert Williams Jr.",
+      "customer_state": "MA",
+      "call_type": "voicemail",
+      "expected_duration": 75,
+      "expected_violations": [
+        "LO1001.08"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Sarah Johnson"
+        ],
+        "customer_names": [
+          "Robert Williams Jr."
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$2,847.32"
+        ],
+        "threatening_language": [],
+        "profanity": [
+          "hell"
+        ],
+        "communication_methods": [],
+        "mini_miranda": [
+          "debt collection disclosure"
+        ],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hello, this is Sarah Johnson from AnyCompany Servicing. I'm calling for Robert regarding your auto loan account number ending in 4567. Your account is currently past due in the amount of $2,847.32. Please call us back at 1-800-555-0123 to discuss payment options and avoid further collection activity. This is an attempt to collect a debt and any information obtained will be used for that purpose. Thank you.",
+      "description": "Agent failed to use customer's full name including suffix 'Jr.' on voicemail",
+      "audio_file": "voicemail_001_VM_2024_001001.wav",
+      "rule_evaluations": {
+        "LO1001.08": {
+          "rule_description": "Agent must use customer's full name including suffix on voicemail",
+          "expected_result": "VIOLATION",
+          "reason": "Agent failed to include customer's suffix in voicemail"
+        }
+      }
+    },
+    "VM-2024-001002": {
+      "agent_name": "Michael Davis",
+      "customer_name": "Jennifer Martinez",
+      "customer_state": "TX",
+      "call_type": "voicemail",
+      "expected_duration": 68,
+      "expected_violations": [
+        "LO1001.09"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Michael Davis"
+        ],
+        "customer_names": [
+          "Jennifer Martinez"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$1,523.89"
+        ],
+        "threatening_language": [],
+        "profanity": [],
+        "communication_methods": [],
+        "mini_miranda": [
+          "debt collection disclosure"
+        ],
+        "customer_name_accuracy": false
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hi Jennifer Johnson, this is Michael Davis calling from AnyCompany Servicing about your credit card account. Your account shows a past due balance of $1,523.89. We need to hear from you within 30 days to resolve this matter. Please call us at 1-800-555-0123. This message is from a debt collector and this is an attempt to collect a debt. Any information obtained will be used for that purpose.",
+      "description": "Agent used incorrect customer last name 'Johnson' instead of 'Martinez'",
+      "audio_file": "voicemail_002_VM_2024_001002.wav",
+      "rule_evaluations": {
+        "LO1001.09": {
+          "rule_description": "Agent must use correct customer name on voicemail",
+          "expected_result": "VIOLATION",
+          "reason": "Agent used incorrect customer last name"
+        }
+      }
+    },
+    "VM-2024-001003": {
+      "agent_name": "Derek Thompson",
+      "customer_name": "Maria Garcia",
+      "customer_state": "CA",
+      "call_type": "voicemail",
+      "expected_duration": 62,
+      "expected_violations": [
+        "LO1005.14"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Derek Thompson"
+        ],
+        "customer_names": [
+          "Maria Garcia"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$3,245.67"
+        ],
+        "threatening_language": [],
+        "profanity": [
+          "damn",
+          "bullshit"
+        ],
+        "communication_methods": [],
+        "mini_miranda": [],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Maria Garcia, this is Derek Thompson from AnyCompany Servicing. Look, I'm getting really tired of calling you about this damn debt. You owe $3,245.67 and you need to stop ignoring us. This is bullshit and you know it. Call me back at 1-800-555-0123 or we're going to take serious action. This is a debt collector attempting to collect a debt.",
+      "description": "Agent used profanity 'damn' and 'bullshit' in voicemail message",
+      "audio_file": "voicemail_003_VM_2024_001003.wav",
+      "rule_evaluations": {
+        "LO1005.14": {
+          "rule_description": "No inappropriate content/profanity in voicemail",
+          "expected_result": "VIOLATION",
+          "reason": "Agent used profanity in voicemail message"
+        }
+      }
+    },
+    "VM-2024-001004": {
+      "agent_name": "Amanda Taylor",
+      "customer_name": "David Wilson",
+      "customer_state": "FL",
+      "call_type": "voicemail",
+      "expected_duration": 71,
+      "expected_violations": [
+        "LO1005.08"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Amanda Taylor"
+        ],
+        "customer_names": [
+          "David Wilson"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$4,156.23"
+        ],
+        "threatening_language": [],
+        "profanity": [
+          "hell"
+        ],
+        "communication_methods": [
+          "text message",
+          "email"
+        ],
+        "mini_miranda": [
+          "debt collection disclosure"
+        ],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hello David Wilson, this is Amanda Taylor from AnyCompany Servicing calling about your account ending in 8901. Your balance is $4,156.23 and is now 90 days past due. I'm also sending you a text message with payment options right after this voicemail. Please respond to either this voicemail or the text message within 48 hours. You can reach us at 1-800-555-0123. This is an attempt to collect a debt.",
+      "description": "Agent sent SMS while leaving voicemail without consent",
+      "audio_file": "voicemail_004_VM_2024_001004.wav",
+      "rule_evaluations": {
+        "LO1005.08": {
+          "rule_description": "Cannot send SMS while leaving voicemail without consent",
+          "expected_result": "VIOLATION",
+          "reason": "Agent sent SMS during voicemail without proper consent"
+        }
+      }
+    },
+    "VM-2024-001005": {
+      "agent_name": "Kevin Brown",
+      "customer_name": "Lisa Anderson",
+      "customer_state": "NY",
+      "call_type": "voicemail",
+      "expected_duration": 69,
+      "expected_violations": [
+        "LO1005.27"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Kevin Brown"
+        ],
+        "customer_names": [
+          "Lisa Anderson"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$2,890.45"
+        ],
+        "threatening_language": [],
+        "profanity": [],
+        "communication_methods": [
+          "text message",
+          "email",
+          "texting"
+        ],
+        "mini_miranda": [],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hi Lisa Anderson, this is Kevin Brown from AnyCompany Servicing. I know you gave us permission to text you, but I'm sending you multiple text messages today along with this voicemail about your $2,890.45 debt. I'll be texting you every few hours until you respond, even though our policy says we should limit texts. Please call 1-800-555-0123. This is from a debt collector.",
+      "description": "Agent violated SMS policy by excessive texting despite consent",
+      "audio_file": "voicemail_005_VM_2024_001005.wav",
+      "rule_evaluations": {}
+    },
+    "VM-2024-001006": {
+      "agent_name": "Rachel Martinez",
+      "customer_name": "Thomas Miller",
+      "customer_state": "MI",
+      "call_type": "voicemail",
+      "expected_duration": 73,
+      "expected_violations": [
+        "LO1007.05"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Rachel Martinez"
+        ],
+        "customer_names": [
+          "Thomas Miller"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$5,234.78"
+        ],
+        "threatening_language": [
+          "arrest",
+          "jail",
+          "police",
+          "legal action"
+        ],
+        "profanity": [],
+        "communication_methods": [],
+        "mini_miranda": [],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Thomas Miller, this is Rachel Martinez from AnyCompany Servicing. Your debt of $5,234.78 is seriously overdue. If you don't call us back within 24 hours, we will have you arrested for theft of services. The police will be notified and you could face jail time. Don't make us take legal action that could result in your arrest. Call 1-800-555-0123 immediately. This is a debt collector.",
+      "description": "Agent threatened arrest and jail time in voicemail",
+      "audio_file": "voicemail_006_VM_2024_001006.wav",
+      "rule_evaluations": {}
+    },
+    "VM-2024-001007": {
+      "agent_name": "Steven Clark",
+      "customer_name": "Jennifer White",
+      "customer_state": "OH",
+      "call_type": "voicemail",
+      "expected_duration": 66,
+      "expected_violations": [
+        "LO1006.01"
+      ],
+      "expected_entities": {
+        "agent_names": [
+          "Steven Clark"
+        ],
+        "customer_names": [
+          "Jennifer White"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [
+          "$3,567.89"
+        ],
+        "threatening_language": [],
+        "profanity": [
+          "hell"
+        ],
+        "communication_methods": [],
+        "mini_miranda": [],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hello, this is Steven Clark from AnyCompany Servicing calling for Jennifer White. Jennifer owes us $3,567.89 from her Capital One credit card that went into default. She hasn't been returning our calls about this debt. If this isn't Jennifer, please have her call us at 1-800-555-0123 about this serious financial matter. This is a debt collection call.",
+      "description": "Agent disclosed debt information in voicemail that could be heard by third parties",
+      "audio_file": "voicemail_007_VM_2024_001007.wav",
+      "rule_evaluations": {}
+    },
+    "VM-2024-002001": {
+      "agent_name": "Patricia Johnson",
+      "customer_name": "John Wilson",
+      "customer_state": "CA",
+      "call_type": "voicemail",
+      "expected_duration": 64,
+      "expected_violations": [],
+      "expected_entities": {
+        "agent_names": [
+          "Patricia Johnson"
+        ],
+        "customer_names": [
+          "John Wilson"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [],
+        "threatening_language": [],
+        "profanity": [
+          "hell"
+        ],
+        "communication_methods": [],
+        "mini_miranda": [
+          "debt collection disclosure"
+        ],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hello, may I speak with John Wilson please? This is Patricia Johnson from AnyCompany Servicing. I'm calling regarding an important business matter. Please call me back at 1-800-555-0123. This is an attempt to collect a debt and any information obtained will be used for that purpose. Thank you and have a good day.",
+      "description": "Proper compliant voicemail with correct identification and mini-Miranda",
+      "audio_file": "voicemail_008_VM_2024_002001.wav",
+      "rule_evaluations": {}
+    },
+    "VM-2024-002002": {
+      "agent_name": "Christopher Lee",
+      "customer_name": "Karen Thompson Sr.",
+      "customer_state": "AZ",
+      "call_type": "voicemail",
+      "expected_duration": 67,
+      "expected_violations": [],
+      "expected_entities": {
+        "agent_names": [
+          "Christopher Lee"
+        ],
+        "customer_names": [
+          "Karen Thompson Sr."
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [],
+        "threatening_language": [],
+        "profanity": [
+          "hell"
+        ],
+        "communication_methods": [],
+        "mini_miranda": [
+          "debt collection disclosure"
+        ],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hello Karen Thompson Senior, this is Christopher Lee from AnyCompany Servicing calling about your account. Please return my call at 1-800-555-0123 at your earliest convenience to discuss an important matter regarding your account. This is an attempt to collect a debt and any information obtained will be used for that purpose. Thank you.",
+      "description": "Proper use of customer's full name including suffix in voicemail",
+      "audio_file": "voicemail_009_VM_2024_002002.wav",
+      "rule_evaluations": {}
+    },
+    "VM-2024-002003": {
+      "agent_name": "Michelle Wilson",
+      "customer_name": "James Taylor",
+      "customer_state": "MA",
+      "call_type": "voicemail",
+      "expected_duration": 70,
+      "expected_violations": [],
+      "expected_entities": {
+        "agent_names": [
+          "Michelle Wilson"
+        ],
+        "customer_names": [
+          "James Taylor"
+        ],
+        "company_identification": [
+          "AnyCompany Servicing"
+        ],
+        "financial_amounts": [],
+        "threatening_language": [],
+        "profanity": [
+          "hell"
+        ],
+        "communication_methods": [],
+        "mini_miranda": [
+          "debt collection disclosure"
+        ],
+        "customer_name_accuracy": true
+      },
+      "flags": {
+        "voicemail_context": true,
+        "third_party_risk": false
+      },
+      "script_content": "Hello James Taylor, this is Michelle Wilson from AnyCompany Servicing. I'm calling regarding your account. Please call me back at 1-800-555-0123. As a Massachusetts resident, you have the right to request validation of this debt within 30 days. This is an attempt to collect a debt and any information obtained will be used for that purpose.",
+      "description": "Compliant Massachusetts voicemail with proper disclosures",
+      "audio_file": "voicemail_010_VM_2024_002003.wav",
+      "rule_evaluations": {}
+    }
+  }
+}

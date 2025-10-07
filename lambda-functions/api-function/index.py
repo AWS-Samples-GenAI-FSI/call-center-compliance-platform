@@ -59,18 +59,21 @@ def get_results(headers):
             except:
                 call['audio_url'] = None
             
-            # Add transcript URL
+            # Add transcript URL for plain text file
             try:
-                # Generate transcript filename from audio filename
-                transcript_filename = call['filename'].replace('.wav', '.json')
-                call['transcript_url'] = s3_client.generate_presigned_url(
-                    'get_object',
-                    Params={
-                        'Bucket': os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
-                        'Key': f"transcripts/{transcript_filename}"
-                    },
-                    ExpiresIn=3600
-                )
+                call_id = call.get('call_id', '')
+                if call_id:
+                    # Generate presigned URL for plain text transcript
+                    call['transcript_url'] = s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={
+                            'Bucket': os.environ['TRANSCRIBE_OUTPUT_BUCKET_NAME'],
+                            'Key': f"transcripts/plain/{call_id}.txt"
+                        },
+                        ExpiresIn=3600
+                    )
+                else:
+                    call['transcript_url'] = None
             except:
                 call['transcript_url'] = None
         

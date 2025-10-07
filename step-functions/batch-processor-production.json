@@ -1,0 +1,116 @@
+{
+  "Comment": "Production Batch Compliance Processing - 10K Files, 100 Parallel",
+  "StartAt": "PrepareBatch",
+  "States": {
+    "PrepareBatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:164543933824:function:anycompany-batch-prep-prod",
+      "ResultPath": "$.batch_result",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "CheckBatchSize"
+    },
+    "CheckBatchSize": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.batch_result.batch_info.total_files_found",
+          "NumericEquals": 0,
+          "Next": "NoBatchFiles"
+        },
+        {
+          "Variable": "$.batch_result.batch_info.total_files_found",
+          "NumericGreaterThan": 15000,
+          "Next": "BatchTooLarge"
+        }
+      ],
+      "Default": "ProcessBatch"
+    },
+    "NoBatchFiles": {
+      "Type": "Pass",
+      "Result": {
+        "status": "completed",
+        "message": "No files found in batch folder",
+        "files_processed": 0,
+        "processing_time_seconds": 0
+      },
+      "End": true
+    },
+    "BatchTooLarge": {
+      "Type": "Pass",
+      "Result": {
+        "status": "error",
+        "message": "Batch size exceeds 15,000 files limit",
+        "files_found.$": "$.batch_result.batch_info.total_files_found",
+        "max_allowed": 15000
+      },
+      "End": true
+    },
+    "ProcessBatch": {
+      "Type": "Map",
+      "ItemsPath": "$.batch_result.calls",
+      "MaxConcurrency": 100,
+      "ToleratedFailurePercentage": 5,
+      "Iterator": {
+        "StartAt": "TriggerProcessing",
+        "States": {
+          "TriggerProcessing": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:164543933824:function:anycompany-batch-trigger-prod",
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "Next": "HandleProcessingError",
+                "ResultPath": "$.error"
+              }
+            ],
+            "End": true
+          },
+          "HandleProcessingError": {
+            "Type": "Pass",
+            "Parameters": {
+              "status": "failed",
+              "filename.$": "$.filename",
+              "genesys_id.$": "$.genesys_id",
+              "error.$": "$.error.Cause"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.processing_results",
+      "Next": "GenerateSummary"
+    },
+    "GenerateSummary": {
+      "Type": "Pass",
+      "Parameters": {
+        "batch_summary": {
+          "status": "completed",
+          "total_files.$": "$.batch_result.batch_info.total_files_found",
+          "files_triggered.$": "States.ArrayLength($.processing_results)",
+          "batch_folder.$": "$.batch_result.batch_info.batch_folder",
+          "processing_timestamp.$": "$.batch_result.batch_info.processing_timestamp",
+          "max_concurrency": 100,
+          "tolerated_failure_percentage": 5,
+          "note": "Production batch processing completed - check DynamoDB for individual call status"
+        }
+      },
+      "OutputPath": "$.batch_summary",
+      "End": true
+    }
+  }
+}
