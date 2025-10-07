@@ -42,7 +42,7 @@ The debt collection and financial services industry operates under intense regul
 
 ## 🏗️ Solution Architecture
 
-![Solution Architecture](solution-architecture.png)
+![Solution Architecture](Solution%20Architecture/solution-architecture-final.png)
 
 ### **Complete AI-Powered Workflow**
 ```
